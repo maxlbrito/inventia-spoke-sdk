@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-04-26
+
+### Changed
+
+- **`HubJWTValidator.issuer` agora é opcional**, default `None` (não valida `iss`). Antes era `"central-hub"`. Razão: o Hub atual ainda não emite a claim `iss`, então o default rígido quebrava integração imediata.
+- `issue_for_test()` agora só inclui `iss` na claim se o validator tiver `issuer` configurado.
+
+### Migration de v0.2.0 → v0.2.1
+
+Spokes que **explicitamente** passavam `issuer="central-hub"` continuam funcionando. Spokes que usavam o default agora **não validam `iss`** — o que mantém compatibilidade com o Hub atual.
+
+Quando o Hub começar a emitir `iss=central-hub` (PR futuro), spokes podem voltar a passar `issuer="central-hub"` para defesa em profundidade.
+
 ## [0.2.0] — 2026-04-26
 
 ### Added

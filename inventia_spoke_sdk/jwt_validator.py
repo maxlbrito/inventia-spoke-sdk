@@ -56,7 +56,7 @@ class HubJWTValidator:
     """
 
     secret: str
-    issuer: str = "central-hub"
+    issuer: str | None = None
     audience: str | None = None
     required_token_type: str | None = "access"
     leeway_seconds: int = 30
@@ -93,12 +93,13 @@ class HubJWTValidator:
 
     def issue_for_test(self, payload: dict[str, Any], exp_in: int = 60) -> str:
         """Forge a token for spoke tests. Defaults type="access" if absent."""
-        body = {
-            "iss": self.issuer,
+        body: dict[str, Any] = {
             "exp": int(time.time()) + exp_in,
             "iat": int(time.time()),
             **payload,
         }
+        if self.issuer and "iss" not in body:
+            body["iss"] = self.issuer
         if self.audience and "aud" not in body:
             body["aud"] = self.audience
         if self.required_token_type and "type" not in body:
