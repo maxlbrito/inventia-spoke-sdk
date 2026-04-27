@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-04-27
+
+### Added
+
+- **Tier/role/policy claims** — `SpokePrincipal` ganha `tier`, `role`, `platform_role`, `policy` (subset do TierPolicy resolvida pelo Hub), `policy_version`, `acr`, `auth_time`, `amr` (RFC 8176). Consumidos do Hub JWT pós-merge das PRs central-hub#116 (TierPolicy) e #118 (claims enriquecidas).
+- Helpers em `SpokePrincipal`:
+  - `has_role(role)` — match exato de Membership role.
+  - `has_platform_role(role)` — match de PlatformRole (platform_owner/admin/support).
+  - `policy_get("limits.page_size_max", default=100)` — acesso dotted no policy claim, com fallback se claim ausente.
+
+### Fixed
+
+- **`audience=None` agora funciona corretamente** — `pyjwt` levanta "Invalid audience" se token tem `aud` mas validator passa `audience=None`. Adicionada flag `verify_aud=False` em options quando audience é None. (Hotfix descoberto durante integração SPA → KC.)
+
+### Use cases
+
+```python
+from inventia_spoke_sdk import HubJWTValidator
+
+validator = HubJWTValidator(jwks_url="https://auth.inventiaapp.com/realms/inventia/protocol/openid-connect/certs")
+principal = validator.validate(token)
+
+# Tier-aware quotas
+limit = principal.policy_get("limits.page_size_max", default=100)
+
+# RBAC
+if not principal.has_role("admin"):
+    raise PermissionDenied()
+
+# Step-up auth: re-pedir credencial se não veio com WebAuthn
+if principal.acr != "2":
+    raise StepUpRequired()
+```
+
+### Compatibility
+
+- `policy_version=2` é o formato emitido pelo Hub atual; spokes que receberem token com `policy_version` desconhecido devem tratar `policy` como opaco e ignorar.
+- Campos novos são todos opcionais (`None` quando claim ausente). Tokens emitidos por versões antigas do Hub continuam funcionando.
+
 ## [0.3.0] — 2026-04-27
 
 ### Added

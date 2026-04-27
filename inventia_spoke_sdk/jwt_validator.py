@@ -143,6 +143,11 @@ class HubJWTValidator:
         if not token:
             raise InvalidToken("empty token")
         options: dict[str, Any] = {"require": ["exp", "sub"]}
+        # Quando audience é None, desabilita validação de aud explicitamente.
+        # pyjwt levanta "Invalid audience" se token tem `aud` e validator não
+        # passa `audience` esperado — comportamento confuso, contornamos.
+        if self.audience is None:
+            options["verify_aud"] = False
 
         # JWKS path (RS256, KC tokens).
         if self._jwks is not None:
@@ -226,6 +231,14 @@ class HubJWTValidator:
             scopes=_parse_scopes(payload.get("scopes")),
             is_super_admin=bool(payload.get("is_super_admin", False)),
             access_token=token,
+            tier=_maybe_int(payload.get("tier")),
+            role=payload.get("role"),
+            platform_role=payload.get("platform_role"),
+            policy=_maybe_dict(payload.get("policy")),
+            policy_version=_maybe_int(payload.get("policy_version")),
+            acr=_maybe_str(payload.get("acr")),
+            auth_time=_maybe_int(payload.get("auth_time")),
+            amr=_parse_scopes(payload.get("amr")),
         )
 
     def _principal_from_client_payload(
@@ -253,6 +266,10 @@ class HubJWTValidator:
             tenant_id=tenant_id,
             scopes=_parse_scopes(payload.get("scopes")),
             access_token=token,
+            tier=_maybe_int(payload.get("tier")),
+            role=payload.get("role"),
+            policy=_maybe_dict(payload.get("policy")),
+            policy_version=_maybe_int(payload.get("policy_version")),
         )
 
 
@@ -271,3 +288,24 @@ def _parse_scopes(raw: Any) -> tuple[str, ...]:
     if not isinstance(raw, (list, tuple)):
         raise InvalidToken("scopes must be a list")
     return tuple(str(s) for s in raw)
+
+
+def _maybe_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        raise InvalidToken(f"invalid int claim: {value!r}") from None
+
+
+def _maybe_str(value: Any) -> str | None:
+    return None if value is None else str(value)
+
+
+def _maybe_dict(value: Any) -> dict | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise InvalidToken(f"invalid dict claim: {type(value).__name__}")
+    return value
