@@ -12,6 +12,7 @@ from inventia_spoke_sdk.exceptions import (
     JWKSError,
     SpokeSDKError,
 )
+from inventia_spoke_sdk.jwks import JWKSFetcher
 from inventia_spoke_sdk.jwt_validator import HubJWTValidator
 from inventia_spoke_sdk.principal import SpokePrincipal
 from inventia_spoke_sdk.version import __version__
@@ -19,6 +20,7 @@ from inventia_spoke_sdk.version import __version__
 __all__ = [
     "__version__",
     "HubJWTValidator",
+    "JWKSFetcher",
     "SpokePrincipal",
     "SpokeSDKError",
     "InvalidToken",

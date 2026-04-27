@@ -30,37 +30,68 @@ Uso:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
 import jwt
+from jwt.algorithms import RSAAlgorithm
 from jwt.exceptions import InvalidTokenError
 
 from inventia_spoke_sdk.exceptions import InvalidToken
+from inventia_spoke_sdk.jwks import JWKSFetcher
 from inventia_spoke_sdk.principal import SpokePrincipal
 
 
 @dataclass
 class HubJWTValidator:
-    """Valida JWT do Hub e retorna ``SpokePrincipal``.
+    """Valida JWT (Hub HS256 OU Keycloak RS256) e retorna ``SpokePrincipal``.
+
+    Modos suportados:
+
+    - **HS256 (legacy / Hub direct)**: passar ``secret``. Algoritmo HS256.
+    - **RS256 + JWKS (Keycloak / OIDC)**: passar ``jwks_url``. Algoritmo
+      RS256 (ou outros publicados no JWKS — KC usa RS256). Cache JWKS
+      com TTL configurável + auto-refresh em ``kid`` desconhecido.
 
     Args:
-        secret: shared secret HS256 (mesmo segredo que o Hub assina).
-        issuer: claim ``iss`` esperado (default ``"central-hub"``).
+        secret: shared secret HS256. Mutuamente exclusivo com jwks_url.
+        jwks_url: URL do JWKS (RS256). Mutuamente exclusivo com secret.
+        issuer: claim ``iss`` esperado, ou None para não checar.
         audience: claim ``aud`` esperado, ou None para não checar.
         required_token_type: se não-None, exige claim ``type`` == valor
-            (Hub usa ``"access"`` para tokens de acesso curto).
+            (Hub legacy usa ``"access"``; KC tokens NÃO têm essa claim).
         leeway_seconds: tolerância de clock skew (default 30s).
-        algorithm: algoritmo de assinatura (default ``"HS256"``).
+        algorithm: algoritmo (default HS256). Em modo JWKS é determinado
+            pelo header ``alg`` do token (validado contra os algoritmos
+            suportados no JWKS).
+        jwks_ttl_seconds: TTL do cache JWKS (default 3600).
+        jwks_cache_path: caminho de disco opcional para cache JWKS.
     """
 
-    secret: str
+    secret: str | None = None
+    jwks_url: str | None = None
     issuer: str | None = None
     audience: str | None = None
     required_token_type: str | None = "access"
     leeway_seconds: int = 30
     algorithm: str = "HS256"
+    jwks_ttl_seconds: int = 3600
+    jwks_cache_path: Any = None  # Path | None — Any to avoid Pydantic-style type strictness
+
+    _jwks: JWKSFetcher | None = field(default=None, init=False)
+
+    def __post_init__(self) -> None:
+        if self.secret is None and self.jwks_url is None:
+            raise ValueError("must provide secret (HS256) or jwks_url (RS256)")
+        if self.secret is not None and self.jwks_url is not None:
+            raise ValueError("provide either secret or jwks_url, not both")
+        if self.jwks_url:
+            self._jwks = JWKSFetcher(
+                jwks_url=self.jwks_url,
+                ttl_seconds=self.jwks_ttl_seconds,
+                cache_path=self.jwks_cache_path,
+            )
 
     # ---- public API -------------------------------------------------------
 
@@ -112,6 +143,45 @@ class HubJWTValidator:
         if not token:
             raise InvalidToken("empty token")
         options: dict[str, Any] = {"require": ["exp", "sub"]}
+
+        # JWKS path (RS256, KC tokens).
+        if self._jwks is not None:
+            try:
+                header = jwt.get_unverified_header(token)
+            except InvalidTokenError as exc:
+                raise InvalidToken(f"malformed token header: {exc}") from exc
+            kid = header.get("kid")
+            if not kid:
+                raise InvalidToken("token missing kid (required for JWKS)")
+            try:
+                jwk = self._jwks.get_key(kid)
+            except Exception as exc:
+                raise InvalidToken(f"JWKS lookup failed: {exc}") from exc
+            try:
+                key = RSAAlgorithm.from_jwk(jwk)
+            except Exception as exc:
+                raise InvalidToken(f"invalid JWK for kid={kid}: {exc}") from exc
+            try:
+                payload = jwt.decode(
+                    token,
+                    key,
+                    algorithms=[header.get("alg", "RS256")],
+                    issuer=self.issuer,
+                    audience=self.audience,
+                    leeway=self.leeway_seconds,
+                    options=options,
+                )
+            except InvalidTokenError as exc:
+                raise InvalidToken(str(exc)) from exc
+            if self.required_token_type is not None:
+                actual = payload.get("type")
+                if actual != self.required_token_type:
+                    raise InvalidToken(
+                        f"wrong token type: expected {self.required_token_type!r}, got {actual!r}"
+                    )
+            return payload
+
+        # HS256 path (legacy Hub).
         try:
             payload = jwt.decode(
                 token,

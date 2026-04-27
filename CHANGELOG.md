@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-04-27
+
+### Added
+
+- **JWKS support (RS256)** — `HubJWTValidator(jwks_url=...)` valida tokens RSA usando chaves publicadas em endpoint JWKS. Necessário para integrar com **Keycloak** (que emite RS256 por padrão) e qualquer OIDC provider.
+- **`JWKSFetcher`** classe pública: cache em memória com TTL configurável (default 1h), auto-refresh em `kid` desconhecido, persistência opcional em disco para resiliência (`cache_path` parameter), graceful degradation quando refresh falha (usa cache stale se disponível).
+- Constructor agora exige **um dos**: `secret` (HS256, modo legado Hub) **ou** `jwks_url` (RS256, modo Keycloak/OIDC). Mutuamente exclusivos.
+
+### Use cases
+
+```python
+# Modo legado (Hub HS256 — pré-Keycloak)
+validator = HubJWTValidator(
+    secret=settings.HUB_JWT_SECRET,
+    issuer="central-hub",
+)
+
+# Modo Keycloak (RS256 + JWKS)
+validator = HubJWTValidator(
+    jwks_url="https://auth.inventia.com.br/realms/inventia/protocol/openid-connect/certs",
+    issuer="https://auth.inventia.com.br/realms/inventia",
+    required_token_type=None,  # KC não emite 'type' claim
+    audience="hub-broker",     # client_id no realm
+)
+
+principal = validator.validate(kc_access_token)
+```
+
+### Robustez
+
+- `JWKSFetcher` continua usando cache stale se KC ficar indisponível (graceful degradation).
+- Cache em disco sobrevive a restart do pod do spoke (resiliência).
+- Refresh automático em `kid` desconhecido (suporta rotação de chave do KC sem downtime).
+
+### Tests
+
+- 47 testes (era 29), coverage 95% (era 99% — caiu marginalmente porque JWKS é mais complexo).
+- 11 novos testes em `test_jwks.py` (cache, TTL, refresh on unknown kid, disk persistence, graceful degradation, invalid response).
+- 7 novos testes em `test_jwt_validator_jwks.py` (RS256 happy path, kid mismatch, signature mismatch, missing kid, constructor guards).
+
+### Migration de v0.2.x → v0.3.0
+
+Spokes que usam HS256 (modo Hub direto): **nada muda**, `secret=...` continua funcionando exatamente igual.
+
+Spokes que vão consumir tokens do Keycloak (Hub broker pattern, M2):
+```python
+# antes (v0.2.x — não suportado para KC)
+# (não há como — KC usa RS256, SDK só fazia HS256)
+
+# agora (v0.3.0)
+validator = HubJWTValidator(
+    jwks_url="https://kc/realms/inventia/protocol/openid-connect/certs",
+    issuer="https://kc/realms/inventia",
+    required_token_type=None,
+)
+```
+
 ## [0.2.1] — 2026-04-26
 
 ### Changed
