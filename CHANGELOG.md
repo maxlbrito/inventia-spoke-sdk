@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0a1] — 2026-05-08 (alpha)
+
+### Added
+
+- **Tenant-aware session resolver** — `inventia_spoke_sdk.db.session_for(principal)` opens an `AsyncSession` bound to the principal's tenant. The spoke registers its own resolver via `configure_session_resolver(...)` at startup; the SDK only enforces the contract.
+  - `SessionFactoryResolver` Protocol — async callable `principal → async_sessionmaker`.
+  - `configure_session_resolver`, `get_session_resolver`, `reset_session_resolver`.
+  - Replaces `_session_for(principal)` previously duplicated in every spoke.
+- **`BaseService`** — common parent for spoke services shared by API handlers and arq jobs. Receives `AsyncSession` directly (no UoW wrapper — `AsyncSession` already implements Unit of Work). Exposes `tenant_id` and a `LoggerAdapter` with `tenant_id`/`user_id` attached.
+- **`inventia_spoke_sdk.fastapi.session_dep_for(principal_dep)`** — builder for FastAPI dependencies that yield a session for the request's principal.
+- **`inventia_spoke_sdk.arq.session_for_job(principal)`** — context manager for arq jobs.
+- **Testing utilities (`inventia_spoke_sdk.testing`)**:
+  - `create_rollback_session_factory(connection)` for rollback-per-test.
+  - `install_test_resolver(factory)` to register a single-factory resolver.
+  - `per_principal_resolver(by_tenant)` for cross-tenant isolation tests.
+
+### Changed
+
+- New runtime dependency: `sqlalchemy>=2.0`.
+- New optional extras: `[fastapi]` (FastAPI helper) and `[testing]` (pytest + aiosqlite).
+
+### Architectural note
+
+The original v0.5.0 plan included `IUnitOfWork` + `SqlAlchemyUnitOfWork`. After review (RFC-001 §4.1 v2), **dropped**: `AsyncSession` from SQLAlchemy 2.0 already implements Unit of Work. Wrapping it would be cargo cult. The kernel that actually needs to live in the SDK is the **tenant-aware session resolver** plus a **base Service** with logging hooks — that is what this release delivers.
+
 ## [0.4.0] — 2026-04-27
 
 ### Added
