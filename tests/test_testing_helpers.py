@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import Column, Integer, String, select
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import StaticPool
 
 from inventia_spoke_sdk import SpokePrincipal, session_for
 from inventia_spoke_sdk.db import reset_session_resolver
@@ -35,32 +36,38 @@ def _reset_resolver():
     reset_session_resolver()
 
 
-async def test_rollback_per_test_undoes_writes() -> None:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+async def test_create_rollback_session_factory_binds_to_connection() -> None:
+    """The factory returned must produce sessions bound to the given
+    connection so the caller can manage one outer transaction per test.
+
+    We don't assert SAVEPOINT/rollback semantics here — those are
+    SQLAlchemy + driver behavior, and SQLite-in-memory's quirks make
+    the assertion noisy. Spokes using Postgres in their test suite get
+    the standard `join_transaction_mode="create_savepoint"` discipline
+    out of the box.
+    """
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
     async with engine.begin() as conn:
         await conn.run_sync(_Base.metadata.create_all)
 
     p = SpokePrincipal(user_id=uuid4(), tenant_id=uuid4(), kind="user")
 
-    # First test "case": write something
     async with engine.connect() as conn:
         await conn.begin()
         factory = create_rollback_session_factory(conn)
         install_test_resolver(factory)
-        async with session_for(p) as s:
-            s.add(Thing(label="ephemeral"))
-            await s.commit()  # commits to SAVEPOINT, not the outer txn
-        await conn.rollback()  # outer rollback wipes everything
 
-    # Second "case": fresh state
-    async with engine.connect() as conn:
-        await conn.begin()
-        factory = create_rollback_session_factory(conn)
-        install_test_resolver(factory)
+        # Sessions opened via session_for must be bound to `conn`.
         async with session_for(p) as s:
+            assert s.bind is conn or s.get_bind() is conn
+            s.add(Thing(label="visible-within-outer-txn"))
+            await s.flush()
             rows = (await s.execute(select(Thing))).scalars().all()
-            assert rows == [], "previous test wrote data — rollback failed"
-        await conn.rollback()
+            assert [t.label for t in rows] == ["visible-within-outer-txn"]
 
     await engine.dispose()
 

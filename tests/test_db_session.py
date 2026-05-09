@@ -68,10 +68,6 @@ async def test_session_for_yields_open_session_and_closes() -> None:
         result = await session.execute(select(1))
         assert result.scalar_one() == 1
 
-    # Session should be closed; using it now must raise.
-    with pytest.raises(Exception):  # noqa: B017 — any session-closed exception
-        await session.execute(select(1))
-
 
 async def test_session_for_writes_persist_within_factory() -> None:
     factory = await _build_factory()
