@@ -25,7 +25,10 @@ def test_principal_v04_populated():
         tier=2,
         role="admin",
         platform_role="platform_support",
-        policy={"limits": {"page_size_max": 100, "overage_behavior": "warn"}, "mfa": {"required": True}},
+        policy={
+            "limits": {"page_size_max": 100, "overage_behavior": "warn"},
+            "mfa": {"required": True},
+        },
         policy_version=2,
         acr="1",
         auth_time=1735000000,

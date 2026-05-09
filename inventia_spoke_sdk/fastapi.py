@@ -36,8 +36,7 @@ from inventia_spoke_sdk.principal import SpokePrincipal
 
 
 def session_dep_for(
-    principal_dep: Callable[..., Awaitable[SpokePrincipal]]
-    | Callable[..., SpokePrincipal],
+    principal_dep: Callable[..., Awaitable[SpokePrincipal]] | Callable[..., SpokePrincipal],
 ) -> Callable[..., AsyncIterator[AsyncSession]]:
     """Build a FastAPI dependency that opens a tenant-scoped session.
 
@@ -48,7 +47,7 @@ def session_dep_for(
     from fastapi import Depends  # local import: keeps fastapi optional
 
     async def _dep(
-        principal: SpokePrincipal = Depends(principal_dep),
+        principal: SpokePrincipal = Depends(principal_dep),  # noqa: B008
     ) -> AsyncIterator[AsyncSession]:
         async with session_for(principal) as session:
             yield session

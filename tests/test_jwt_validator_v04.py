@@ -9,7 +9,6 @@ import jwt as pyjwt
 
 from inventia_spoke_sdk import HubJWTValidator
 
-
 SECRET = "test-secret"
 
 

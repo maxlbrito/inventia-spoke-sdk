@@ -31,9 +31,7 @@ class SessionFactoryResolver(Protocol):
     tenant of ``principal`` and MUST NOT leak across tenants.
     """
 
-    async def __call__(
-        self, principal: SpokePrincipal
-    ) -> async_sessionmaker[AsyncSession]: ...
+    async def __call__(self, principal: SpokePrincipal) -> async_sessionmaker[AsyncSession]: ...
 
 
 _resolver: SessionFactoryResolver | None = None

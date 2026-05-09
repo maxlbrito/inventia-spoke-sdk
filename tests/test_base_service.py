@@ -6,7 +6,7 @@ import logging
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from inventia_spoke_sdk import BaseService, SpokePrincipal
 
@@ -42,9 +42,7 @@ async def test_base_service_logger_attaches_tenant_id(session, caplog) -> None:
     with caplog.at_level(logging.INFO):
         svc.log.info("doing thing")
 
-    assert any(
-        rec.tenant_id == str(tenant) for rec in caplog.records if hasattr(rec, "tenant_id")
-    )
+    assert any(rec.tenant_id == str(tenant) for rec in caplog.records if hasattr(rec, "tenant_id"))
 
 
 async def test_base_service_subclass_pattern(session) -> None:
