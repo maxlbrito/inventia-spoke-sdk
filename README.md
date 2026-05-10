@@ -113,6 +113,48 @@ async def run_companies_import(ctx, job_id, tenant_id, access_token):
 
 Para testes, ver `inventia_spoke_sdk.testing` (rollback-per-test e cross-tenant resolver).
 
+### OpenTelemetry distribuído (v0.5.0a2+)
+
+Helpers opcionais para tracing distribuído. Instale com `inventia-spoke-sdk[otel]` para puxar as dependências; sem elas, todos os helpers são no-op silencioso (você pode decorar livremente).
+
+```python
+# 1. inicializar no startup (FastAPI lifespan / arq on_startup)
+from inventia_spoke_sdk.telemetry import setup_otel
+
+setup_otel(
+    service_name="master-data-api",
+    environment="production",
+    # otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+    # sample_rate=0.1,
+)
+```
+
+```python
+# 2. decorar métodos de Service
+from inventia_spoke_sdk.telemetry import traced
+
+class CompanyService(BaseService):
+    @traced()
+    async def upsert(self, payload):
+        # span "CompanyService.upsert" com tenant_id/user_id anexos
+        ...
+```
+
+```python
+# 3. propagar trace pela fila arq
+from inventia_spoke_sdk.telemetry import enqueue_with_trace, traced_arq_job
+
+# API enfileira:
+await enqueue_with_trace(pool, "run_companies_import", str(job_id), tenant_id, token)
+
+# Worker processa: o decorator extrai o traceparent injetado e abre span filho
+@traced_arq_job
+async def run_companies_import(ctx, job_id, tenant_id, access_token, **kwargs):
+    ...
+```
+
+Resultado: trace_id único do clique no FE → endpoint API → enqueue → worker → SEFAZ outbound, visível em qualquer backend OTEL (Tempo, Jaeger, Honeycomb).
+
 ## API pública (v0.1.0)
 
 | Símbolo | Descrição |

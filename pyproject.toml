@@ -1,7 +1,7 @@
 [project]
 name = "inventia-spoke-sdk"
-version = "0.5.0a1"
-description = "Inventia Spoke SDK — JWT validation, SpokePrincipal, session factory + BaseService for the Hub↔Spoke contract."
+version = "0.5.0a2"
+description = "Inventia Spoke SDK — JWT validation, SpokePrincipal, session factory + BaseService + OpenTelemetry helpers for the Hub↔Spoke contract."
 authors = [{ name = "Max Brito", email = "maxlbrito@inventia.com.br" }]
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,6 +16,14 @@ dependencies = [
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.110"]
 testing = ["pytest>=8.3", "pytest-asyncio>=0.24", "aiosqlite>=0.19"]
+otel = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
+]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
@@ -25,6 +33,12 @@ dev = [
     "cryptography>=42.0",
     "aiosqlite>=0.19",
     "fastapi>=0.110",
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.48b0",
 ]
 
 [build-system]
