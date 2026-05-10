@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0a2] — 2026-05-09 (alpha)
+
+### Added — OpenTelemetry helpers (RFC-001 §4.2, issue #4)
+
+- **`inventia_spoke_sdk.telemetry.setup_otel(...)`** — idempotent process-wide initialisation. Reads sane defaults from `OTEL_*` env vars; explicit kwargs win. Auto-instruments FastAPI, httpx and SQLAlchemy when their instrumentation packages are available. `shutdown_otel()` flushes and resets state (test/graceful-stop helper).
+- **`inventia_spoke_sdk.telemetry.traced`** — decorator for `BaseService` methods. Opens a span named `<ClassName>.<method>`, attaches `inventia.tenant_id` / `inventia.user_id` / `inventia.client_id` from `self.principal`, records exceptions and marks span error on raise. Works with sync and async methods.
+- **`inventia_spoke_sdk.telemetry.enqueue_with_trace(pool, fn_name, *args, **kwargs)`** — drop-in replacement for `pool.enqueue_job` that injects the W3C `traceparent` (and `tracestate`) into a reserved `_otel_carrier` kwarg.
+- **`inventia_spoke_sdk.telemetry.traced_arq_job`** — decorator for arq job functions that pops `_otel_carrier`, restores the OTEL context, and runs the body inside an `arq.job <name>` span. Together with `enqueue_with_trace`, the parent's `trace_id` propagates across the Redis queue boundary unchanged.
+
+### Changed
+
+- New optional extra: `[otel]` — `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http`, plus FastAPI/httpx/SQLAlchemy instrumentations. Telemetry helpers no-op silently when this extra is not installed, so spokes can decorate services and replace `pool.enqueue_job` calls without paying anything until they opt in.
+
+### Tests
+
+- 10 new tests in `tests/test_telemetry.py` covering both code paths:
+  - Without OTEL extra (HAS_OTEL=False) → every helper is a passthrough.
+  - With OTEL active → `@traced` creates the right span + attrs, exceptions are recorded, `enqueue_with_trace` injects `traceparent`, end-to-end propagation preserves `trace_id` across queue.
+- Full suite: 83 passed (was 73), CI green on 3.11 + 3.12.
+
 ## [0.5.0a1] — 2026-05-08 (alpha)
 
 ### Added
