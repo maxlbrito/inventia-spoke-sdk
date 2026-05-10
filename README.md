@@ -59,6 +59,60 @@ async def get_principal(authorization: str = Header(...)) -> SpokePrincipal:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e))
 ```
 
+### Camada de sessão e Service (v0.5.0+)
+
+`AsyncSession` do SQLAlchemy 2.0 **já é** um Unit of Work — o SDK não embrulha. O que padronizamos é (1) o resolver tenant-aware e (2) a base de Service que API e Worker compartilham.
+
+```python
+# 1. registrar resolver no startup do spoke
+from inventia_spoke_sdk import configure_session_resolver
+from app.db_pool import ensure_schema, get_engine
+from app.hub_client import fetch_spoke_context
+
+async def my_resolver(principal):
+    ctx = await fetch_spoke_context(principal.access_token, str(principal.tenant_id))
+    await ensure_schema(ctx.account_id, ctx.db_url)
+    return (await get_engine(ctx.account_id, ctx.db_url)).session_factory
+
+configure_session_resolver(my_resolver)
+```
+
+```python
+# 2. Service compartilhado por API e Worker
+from inventia_spoke_sdk import BaseService
+
+class CompanyService(BaseService):
+    async def upsert(self, payload: CompanyDTO) -> Company:
+        # validação + persistência
+        ...
+```
+
+```python
+# 3a. Controller fino
+from inventia_spoke_sdk.fastapi import session_dep_for
+db_session = session_dep_for(require_write)
+
+@router.post("/companies")
+async def create(
+    payload: CompanyDTO,
+    session: AsyncSession = Depends(db_session),
+    principal: SpokePrincipal = Depends(require_write),
+):
+    return await CompanyService(session, principal).upsert(payload)
+```
+
+```python
+# 3b. Worker chama o mesmo Service
+from inventia_spoke_sdk.arq import session_for_job
+
+async def run_companies_import(ctx, job_id, tenant_id, access_token):
+    principal = SpokePrincipal(...)
+    async with session_for_job(principal) as session:
+        await CompanyService(session, principal).process_import(job_id)
+```
+
+Para testes, ver `inventia_spoke_sdk.testing` (rollback-per-test e cross-tenant resolver).
+
 ## API pública (v0.1.0)
 
 | Símbolo | Descrição |
