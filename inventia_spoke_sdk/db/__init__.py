@@ -11,6 +11,7 @@ explicit transaction boundaries.
 """
 
 from inventia_spoke_sdk.db.session import (
+    TENANT_GUC,
     SessionFactoryResolver,
     configure_session_resolver,
     get_session_resolver,
@@ -19,6 +20,7 @@ from inventia_spoke_sdk.db.session import (
 )
 
 __all__ = [
+    "TENANT_GUC",
     "SessionFactoryResolver",
     "configure_session_resolver",
     "get_session_resolver",

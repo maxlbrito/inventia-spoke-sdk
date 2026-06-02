@@ -38,7 +38,7 @@ import jwt
 from jwt.algorithms import RSAAlgorithm
 from jwt.exceptions import InvalidTokenError
 
-from inventia_spoke_sdk.exceptions import InvalidToken
+from inventia_spoke_sdk.exceptions import InvalidToken, TenantMismatch
 from inventia_spoke_sdk.jwks import JWKSFetcher
 from inventia_spoke_sdk.principal import SpokePrincipal
 
@@ -78,6 +78,13 @@ class HubJWTValidator:
     algorithm: str = "HS256"
     jwks_ttl_seconds: int = 3600
     jwks_cache_path: Any = None  # Path | None — Any to avoid Pydantic-style type strictness
+    # v0.6.0 — cross-check de tenant (camada 4 / corrige §1.6).
+    # enforce_tenant_match: se o token traz claim de tenant e um tenant_id é
+    #   pedido (header/path), eles DEVEM bater; senão → TenantMismatch.
+    # require_tenant_claim: se True, exige que o token traga o claim de tenant
+    #   quando um tenant_id é pedido (default False p/ transição HS256→KC).
+    enforce_tenant_match: bool = True
+    require_tenant_claim: bool = False
 
     _jwks: JWKSFetcher | None = field(default=None, init=False)
 
@@ -208,6 +215,24 @@ class HubJWTValidator:
                 )
         return payload
 
+    def _resolve_tenant(self, payload: dict[str, Any], tenant_id: UUID | None) -> UUID | None:
+        """Cross-check (camada 4): tenant pedido × tenant do token.
+
+        Retorna o tenant do token (claim ``active_tenant_id``/``tenant_id``).
+        Levanta ``TenantMismatch`` se o pedido divergir do claim, ou se o claim
+        faltar e ``require_tenant_claim`` estiver ligado.
+        """
+        token_tenant = _maybe_uuid(payload.get("active_tenant_id") or payload.get("tenant_id"))
+        if self.enforce_tenant_match and tenant_id is not None:
+            if token_tenant is not None:
+                if token_tenant != tenant_id:
+                    raise TenantMismatch(
+                        f"token tenant {token_tenant} != requested tenant {tenant_id}"
+                    )
+            elif self.require_tenant_claim:
+                raise TenantMismatch("token missing tenant claim (active_tenant_id/tenant_id)")
+        return token_tenant
+
     def _principal_from_user_payload(
         self,
         payload: dict[str, Any],
@@ -219,6 +244,8 @@ class HubJWTValidator:
         except (KeyError, ValueError) as exc:
             raise InvalidToken(f"invalid sub claim: {exc}") from exc
 
+        token_tenant = self._resolve_tenant(payload, tenant_id)
+
         return SpokePrincipal(
             kind="user",
             user_id=user_id,
@@ -228,6 +255,8 @@ class HubJWTValidator:
             ),
             account_id=_maybe_uuid(payload.get("active_account_id") or payload.get("account_id")),
             tenant_id=tenant_id,
+            token_tenant_id=token_tenant,
+            company_ids=_parse_scopes(payload.get("company_ids")),
             scopes=_parse_scopes(payload.get("scopes")),
             is_super_admin=bool(payload.get("is_super_admin", False)),
             access_token=token,
@@ -256,6 +285,8 @@ class HubJWTValidator:
         except (KeyError, ValueError) as exc:
             raise InvalidToken(f"client token missing account_id claim: {exc}") from exc
 
+        token_tenant = self._resolve_tenant(payload, tenant_id)
+
         return SpokePrincipal(
             kind="client",
             client_id=client_id,
@@ -264,6 +295,8 @@ class HubJWTValidator:
                 payload.get("active_contract_id") or payload.get("contract_id")
             ),
             tenant_id=tenant_id,
+            token_tenant_id=token_tenant,
+            company_ids=_parse_scopes(payload.get("company_ids")),
             scopes=_parse_scopes(payload.get("scopes")),
             access_token=token,
             tier=_maybe_int(payload.get("tier")),
