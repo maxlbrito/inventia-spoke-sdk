@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-06-02
+
+Camada de enforcement das 5 camadas de isolamento (Fase 3 do
+`plano-auth-keycloak`). Fecha a lacuna de segurança em que o `X-Tenant-Id`
+não era cross-checado contra o token.
+
+### Added
+
+- **Cross-check de tenant (camada 4)** em `HubJWTValidator`: se o token traz
+  claim de tenant (`active_tenant_id`/`tenant_id`) e um `tenant_id` é pedido,
+  eles DEVEM bater — senão `TenantMismatch`. Flags `enforce_tenant_match`
+  (default `True`) e `require_tenant_claim` (default `False`, para a transição
+  HS256→Keycloak).
+- **`MultiValidator` (Fase 6 — dual-validate)** — valida um token contra vários
+  `HubJWTValidator` (ex.: Hub HS256 + Keycloak RS256/JWKS) tentando cada um;
+  faz fallback em `InvalidToken` (emissor errado) mas propaga erros de
+  autorização (`TenantMismatch`) na hora. Habilita o cutover do strangler.
+- **`db.assert_rls_enforceable(session, strict=)` (Fase 6)** — detecta role de
+  conexão SUPERUSER/BYPASSRLS (que ignora RLS — risco R-2b); `strict=True`
+  levanta (fail-closed em prod), senão loga warning. No-op fora de PostgreSQL.
+- **MCP / Resource Server discovery (Fase 5)** — `inventia_spoke_sdk.mcp`:
+  `protected_resource_metadata` / `mount_protected_resource_metadata`
+  (RFC 9728 `/.well-known/oauth-protected-resource`) e
+  `protected_resource_challenge` (header `WWW-Authenticate` apontando para o
+  metadata). O RS publica seu `aud` + AS(es) + escopos; o enforcement reusa as
+  5 camadas.
+- **Claim `scope` (string OIDC/Keycloak)** unido a `scopes` (lista, Hub legacy)
+  em `SpokePrincipal.scopes` — o SDK valida tanto tokens HS256 do Hub quanto
+  RS256 do Keycloak (Fase 1, AS canônico).
+- **`SpokePrincipal.token_tenant_id`** (tenant do token) e **`company_ids`**
+  (subconjunto de CNPJs permitidos dentro do tenant; vazio = todos).
+  Helpers `company_allowed()` e `has_any_scope()`.
+- **`inventia_spoke_sdk.enforcement`** (camadas 2 e 4b + erros padronizados):
+  - `assert_scope` / `assert_any_scope` — escopo `recurso:ação`.
+  - `assert_company_allowed` — filtro por CNPJ dentro do tenant.
+  - `require_scope(scope, principal_dep)` — fábrica de dependency FastAPI.
+  - `install_auth_exception_handlers(app)` — mapeia as exceções para
+    `401 invalid_token`, `403 insufficient_scope`, `403 tenant_mismatch`,
+    `403 company_not_allowed` com header `WWW-Authenticate: Bearer`.
+- **Exceções de autorização (403):** `AuthorizationError`, `TenantMismatch`,
+  `InsufficientScope`, `CompanyNotAllowed`.
+- **`SET LOCAL app.current_tenant` (camada 5/RLS)**: `session_for` reaplica o
+  GUC em toda transação via listener `after_begin`, com `is_local=true` (não
+  vaza pela pool) e **só em PostgreSQL** (no-op em SQLite). Constante
+  `inventia_spoke_sdk.db.TENANT_GUC`.
+
+### Migração (spokes que adotarem v0.6.0)
+
+- Chamar `install_auth_exception_handlers(app)` no startup — caso contrário
+  `TenantMismatch`/`InsufficientScope`/`CompanyNotAllowed` viram 500.
+- `validate_*` agora pode levantar `TenantMismatch` (403). Tratar via handler
+  acima (ou capturar explicitamente).
+- Declarar o escopo por endpoint com `require_scope("<recurso>:<ação>", require_principal)`.
+- Garantir que o usuário de conexão do banco **não** tem `BYPASSRLS` e que as
+  policies usam `current_setting('app.current_tenant', true)`.
+
 ## [0.5.0a1] — 2026-05-08 (alpha)
 
 ### Added

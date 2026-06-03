@@ -1,6 +1,6 @@
 [project]
 name = "inventia-spoke-sdk"
-version = "0.5.0a1"
+version = "0.6.0"
 description = "Inventia Spoke SDK — JWT validation, SpokePrincipal, session factory + BaseService for the Hub↔Spoke contract."
 authors = [{ name = "Max Brito", email = "maxlbrito@inventia.com.br" }]
 readme = "README.md"

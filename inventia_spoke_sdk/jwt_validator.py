@@ -38,7 +38,7 @@ import jwt
 from jwt.algorithms import RSAAlgorithm
 from jwt.exceptions import InvalidTokenError
 
-from inventia_spoke_sdk.exceptions import InvalidToken
+from inventia_spoke_sdk.exceptions import AuthorizationError, InvalidToken, TenantMismatch
 from inventia_spoke_sdk.jwks import JWKSFetcher
 from inventia_spoke_sdk.principal import SpokePrincipal
 
@@ -78,6 +78,13 @@ class HubJWTValidator:
     algorithm: str = "HS256"
     jwks_ttl_seconds: int = 3600
     jwks_cache_path: Any = None  # Path | None — Any to avoid Pydantic-style type strictness
+    # v0.6.0 — cross-check de tenant (camada 4 / corrige §1.6).
+    # enforce_tenant_match: se o token traz claim de tenant e um tenant_id é
+    #   pedido (header/path), eles DEVEM bater; senão → TenantMismatch.
+    # require_tenant_claim: se True, exige que o token traga o claim de tenant
+    #   quando um tenant_id é pedido (default False p/ transição HS256→KC).
+    enforce_tenant_match: bool = True
+    require_tenant_claim: bool = False
 
     _jwks: JWKSFetcher | None = field(default=None, init=False)
 
@@ -208,6 +215,24 @@ class HubJWTValidator:
                 )
         return payload
 
+    def _resolve_tenant(self, payload: dict[str, Any], tenant_id: UUID | None) -> UUID | None:
+        """Cross-check (camada 4): tenant pedido × tenant do token.
+
+        Retorna o tenant do token (claim ``active_tenant_id``/``tenant_id``).
+        Levanta ``TenantMismatch`` se o pedido divergir do claim, ou se o claim
+        faltar e ``require_tenant_claim`` estiver ligado.
+        """
+        token_tenant = _maybe_uuid(payload.get("active_tenant_id") or payload.get("tenant_id"))
+        if self.enforce_tenant_match and tenant_id is not None:
+            if token_tenant is not None:
+                if token_tenant != tenant_id:
+                    raise TenantMismatch(
+                        f"token tenant {token_tenant} != requested tenant {tenant_id}"
+                    )
+            elif self.require_tenant_claim:
+                raise TenantMismatch("token missing tenant claim (active_tenant_id/tenant_id)")
+        return token_tenant
+
     def _principal_from_user_payload(
         self,
         payload: dict[str, Any],
@@ -219,6 +244,8 @@ class HubJWTValidator:
         except (KeyError, ValueError) as exc:
             raise InvalidToken(f"invalid sub claim: {exc}") from exc
 
+        token_tenant = self._resolve_tenant(payload, tenant_id)
+
         return SpokePrincipal(
             kind="user",
             user_id=user_id,
@@ -228,7 +255,9 @@ class HubJWTValidator:
             ),
             account_id=_maybe_uuid(payload.get("active_account_id") or payload.get("account_id")),
             tenant_id=tenant_id,
-            scopes=_parse_scopes(payload.get("scopes")),
+            token_tenant_id=token_tenant,
+            company_ids=_parse_scopes(payload.get("company_ids")),
+            scopes=_merge_scopes(payload),
             is_super_admin=bool(payload.get("is_super_admin", False)),
             access_token=token,
             tier=_maybe_int(payload.get("tier")),
@@ -256,6 +285,8 @@ class HubJWTValidator:
         except (KeyError, ValueError) as exc:
             raise InvalidToken(f"client token missing account_id claim: {exc}") from exc
 
+        token_tenant = self._resolve_tenant(payload, tenant_id)
+
         return SpokePrincipal(
             kind="client",
             client_id=client_id,
@@ -264,13 +295,80 @@ class HubJWTValidator:
                 payload.get("active_contract_id") or payload.get("contract_id")
             ),
             tenant_id=tenant_id,
-            scopes=_parse_scopes(payload.get("scopes")),
+            token_tenant_id=token_tenant,
+            company_ids=_parse_scopes(payload.get("company_ids")),
+            scopes=_merge_scopes(payload),
             access_token=token,
             tier=_maybe_int(payload.get("tier")),
             role=payload.get("role"),
             policy=_maybe_dict(payload.get("policy")),
             policy_version=_maybe_int(payload.get("policy_version")),
         )
+
+
+@dataclass
+class MultiValidator:
+    """Valida um token contra VÁRIOS ``HubJWTValidator`` (dual-validate).
+
+    Habilita o cutover do strangler (Q-1=C): durante a transição os spokes
+    aceitam tanto tokens HS256 do Hub quanto RS256 do Keycloak. Configure-o com
+    um validador por emissor (cada um com seu secret/jwks + iss + aud)::
+
+        validator = MultiValidator([
+            HubJWTValidator(secret=HUB_SECRET, issuer="inventia-hub",
+                            audience="inventia-spokes"),
+            HubJWTValidator(jwks_url=KC_CERTS, issuer=KC_ISSUER,
+                            audience=RS_URL, required_token_type=None),
+        ])
+
+    Semântica: tenta cada validador na ordem; em ``InvalidToken`` (token não é
+    deste emissor — assinatura/iss/aud/alg/kid) tenta o próximo. Erros de
+    AUTORIZAÇÃO (``TenantMismatch`` etc.) são DEFINITIVOS e propagam na hora —
+    um token validamente assinado mas no tenant errado não deve "passar" por
+    outro validador. Se todos derem ``InvalidToken``, relança o último.
+    """
+
+    validators: list[HubJWTValidator]
+
+    def __post_init__(self) -> None:
+        if not self.validators:
+            raise ValueError("MultiValidator requires at least one validator")
+
+    def validate_any(self, token: str, *, tenant_id: UUID | None = None) -> SpokePrincipal:
+        last: InvalidToken | None = None
+        for v in self.validators:
+            try:
+                return v.validate_any(token, tenant_id=tenant_id)
+            except AuthorizationError:
+                raise  # 403 definitivo — não tenta outro emissor
+            except InvalidToken as exc:
+                last = exc
+                continue
+        raise last or InvalidToken("no validator matched the token")
+
+    def validate_user_token(self, token: str, *, tenant_id: UUID | None = None) -> SpokePrincipal:
+        last: InvalidToken | None = None
+        for v in self.validators:
+            try:
+                return v.validate_user_token(token, tenant_id=tenant_id)
+            except AuthorizationError:
+                raise
+            except InvalidToken as exc:
+                last = exc
+                continue
+        raise last or InvalidToken("no validator matched the token")
+
+    def validate_client_token(self, token: str, *, tenant_id: UUID | None = None) -> SpokePrincipal:
+        last: InvalidToken | None = None
+        for v in self.validators:
+            try:
+                return v.validate_client_token(token, tenant_id=tenant_id)
+            except AuthorizationError:
+                raise
+            except InvalidToken as exc:
+                last = exc
+                continue
+        raise last or InvalidToken("no validator matched the token")
 
 
 def _maybe_uuid(value: Any) -> UUID | None:
@@ -288,6 +386,24 @@ def _parse_scopes(raw: Any) -> tuple[str, ...]:
     if not isinstance(raw, (list, tuple)):
         raise InvalidToken("scopes must be a list")
     return tuple(str(s) for s in raw)
+
+
+def _merge_scopes(payload: dict[str, Any]) -> tuple[str, ...]:
+    """Une o claim ``scopes`` (lista — Hub legacy) com ``scope`` (string
+    separada por espaço — padrão OIDC/Keycloak). Permite que o SDK valide
+    tanto tokens HS256 do Hub quanto RS256 do Keycloak (Fase 1, AS canônico).
+    """
+    out = list(_parse_scopes(payload.get("scopes")))
+    raw = payload.get("scope")
+    if isinstance(raw, str):
+        out.extend(s for s in raw.split() if s)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for s in out:
+        if s not in seen:
+            seen.add(s)
+            deduped.append(s)
+    return tuple(deduped)
 
 
 def _maybe_int(value: Any) -> int | None:

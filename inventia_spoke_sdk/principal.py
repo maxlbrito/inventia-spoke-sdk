@@ -45,6 +45,15 @@ class SpokePrincipal:
     auth_time: int | None = None
     amr: tuple[str, ...] = field(default_factory=tuple)
 
+    # v0.6.0 — isolamento por tenant/CNPJ
+    # ``token_tenant_id``: tenant gravado NO token (claim ``active_tenant_id``/
+    # ``tenant_id``). Distingue-se de ``tenant_id``, que é o tenant PEDIDO
+    # (path/header). O validador garante que batem (ver HubJWTValidator).
+    token_tenant_id: UUID | None = None
+    # ``company_ids``: subconjunto de CNPJs (``company_id``) permitidos DENTRO
+    # do tenant. Vazio = todos os CNPJs do tenant (ver 0.1.1 do plano).
+    company_ids: tuple[str, ...] = field(default_factory=tuple)
+
     def __post_init__(self) -> None:
         if self.kind == "user" and self.user_id is None:
             raise ValueError("user kind requires user_id")
@@ -65,6 +74,21 @@ class SpokePrincipal:
 
     def has_scope(self, scope: str) -> bool:
         return scope in self.scopes
+
+    def has_any_scope(self, scopes: tuple[str, ...] | list[str]) -> bool:
+        """True se a identidade tem PELO MENOS um dos escopos."""
+        return any(s in self.scopes for s in scopes)
+
+    def company_allowed(self, company_id: str | UUID) -> bool:
+        """True se ``company_id`` pode ser acessado por esta identidade.
+
+        Regra (ver 0.1.1 do plano): ``company_ids`` vazio = acesso a TODOS os
+        CNPJs do tenant. Com restrição, só os listados. Comparação textual
+        (``company_id`` é TEXT/UUID nas tabelas de negócio).
+        """
+        if not self.company_ids:
+            return True
+        return str(company_id) in self.company_ids
 
     def has_role(self, role: str) -> bool:
         """Match exato de Membership role (admin, operator, viewer, etc)."""
