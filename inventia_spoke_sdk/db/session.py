@@ -112,9 +112,7 @@ async def assert_rls_enforceable(session: AsyncSession, *, strict: bool = False)
         return True
     row = (
         await session.execute(
-            text(
-                "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"
-            )
+            text("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")
         )
     ).scalar()
     can_bypass = bool(row)

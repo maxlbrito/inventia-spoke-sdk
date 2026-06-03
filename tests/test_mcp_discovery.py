@@ -26,8 +26,7 @@ def test_metadata_shape():
 def test_challenge_points_to_metadata():
     c = protected_resource_challenge("https://reinf.inventiaapp.com/", scope="reinf:write")
     expected = (
-        'resource_metadata="https://reinf.inventiaapp.com'
-        '/.well-known/oauth-protected-resource"'
+        'resource_metadata="https://reinf.inventiaapp.com/.well-known/oauth-protected-resource"'
     )
     assert expected in c
     assert 'scope="reinf:write"' in c

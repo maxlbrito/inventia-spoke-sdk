@@ -72,9 +72,7 @@ def test_company_not_allowed_raises() -> None:
 
 
 def test_company_super_admin_bypass() -> None:
-    assert_company_allowed(
-        _principal(company_ids=(str(uuid4()),), is_super_admin=True), uuid4()
-    )
+    assert_company_allowed(_principal(company_ids=(str(uuid4()),), is_super_admin=True), uuid4())
 
 
 # ---- FastAPI integration: require_scope + handlers -------------------------
