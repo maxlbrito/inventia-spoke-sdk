@@ -257,7 +257,7 @@ class HubJWTValidator:
             tenant_id=tenant_id,
             token_tenant_id=token_tenant,
             company_ids=_parse_scopes(payload.get("company_ids")),
-            scopes=_parse_scopes(payload.get("scopes")),
+            scopes=_merge_scopes(payload),
             is_super_admin=bool(payload.get("is_super_admin", False)),
             access_token=token,
             tier=_maybe_int(payload.get("tier")),
@@ -297,7 +297,7 @@ class HubJWTValidator:
             tenant_id=tenant_id,
             token_tenant_id=token_tenant,
             company_ids=_parse_scopes(payload.get("company_ids")),
-            scopes=_parse_scopes(payload.get("scopes")),
+            scopes=_merge_scopes(payload),
             access_token=token,
             tier=_maybe_int(payload.get("tier")),
             role=payload.get("role"),
@@ -321,6 +321,24 @@ def _parse_scopes(raw: Any) -> tuple[str, ...]:
     if not isinstance(raw, (list, tuple)):
         raise InvalidToken("scopes must be a list")
     return tuple(str(s) for s in raw)
+
+
+def _merge_scopes(payload: dict[str, Any]) -> tuple[str, ...]:
+    """Une o claim ``scopes`` (lista — Hub legacy) com ``scope`` (string
+    separada por espaço — padrão OIDC/Keycloak). Permite que o SDK valide
+    tanto tokens HS256 do Hub quanto RS256 do Keycloak (Fase 1, AS canônico).
+    """
+    out = list(_parse_scopes(payload.get("scopes")))
+    raw = payload.get("scope")
+    if isinstance(raw, str):
+        out.extend(s for s in raw.split() if s)
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for s in out:
+        if s not in seen:
+            seen.add(s)
+            deduped.append(s)
+    return tuple(deduped)
 
 
 def _maybe_int(value: Any) -> int | None:

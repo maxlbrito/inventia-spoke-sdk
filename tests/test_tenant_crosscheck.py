@@ -106,3 +106,15 @@ def test_client_token_crosscheck() -> None:
     )
     with pytest.raises(TenantMismatch):
         v.validate_any(token, tenant_id=tenant)
+
+
+def test_scope_string_claim_parsed_like_keycloak() -> None:
+    """KC emite `scope` (string); SDK deve unir com `scopes` (lista)."""
+    v = HubJWTValidator(secret=SECRET)
+    tenant = uuid4()
+    token = _user_token(
+        {"active_tenant_id": str(tenant), "scope": "reinf:read reinf:write", "scopes": ["nfe:read"]}
+    )
+    p = v.validate_any(token, tenant_id=tenant)
+    assert set(p.scopes) == {"reinf:read", "reinf:write", "nfe:read"}
+    assert p.has_scope("reinf:write")

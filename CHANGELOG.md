@@ -18,6 +18,9 @@ não era cross-checado contra o token.
   eles DEVEM bater — senão `TenantMismatch`. Flags `enforce_tenant_match`
   (default `True`) e `require_tenant_claim` (default `False`, para a transição
   HS256→Keycloak).
+- **Claim `scope` (string OIDC/Keycloak)** unido a `scopes` (lista, Hub legacy)
+  em `SpokePrincipal.scopes` — o SDK valida tanto tokens HS256 do Hub quanto
+  RS256 do Keycloak (Fase 1, AS canônico).
 - **`SpokePrincipal.token_tenant_id`** (tenant do token) e **`company_ids`**
   (subconjunto de CNPJs permitidos dentro do tenant; vazio = todos).
   Helpers `company_allowed()` e `has_any_scope()`.
