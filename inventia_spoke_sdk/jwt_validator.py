@@ -38,7 +38,7 @@ import jwt
 from jwt.algorithms import RSAAlgorithm
 from jwt.exceptions import InvalidTokenError
 
-from inventia_spoke_sdk.exceptions import InvalidToken, TenantMismatch
+from inventia_spoke_sdk.exceptions import AuthorizationError, InvalidToken, TenantMismatch
 from inventia_spoke_sdk.jwks import JWKSFetcher
 from inventia_spoke_sdk.principal import SpokePrincipal
 
@@ -304,6 +304,71 @@ class HubJWTValidator:
             policy=_maybe_dict(payload.get("policy")),
             policy_version=_maybe_int(payload.get("policy_version")),
         )
+
+
+@dataclass
+class MultiValidator:
+    """Valida um token contra VÁRIOS ``HubJWTValidator`` (dual-validate).
+
+    Habilita o cutover do strangler (Q-1=C): durante a transição os spokes
+    aceitam tanto tokens HS256 do Hub quanto RS256 do Keycloak. Configure-o com
+    um validador por emissor (cada um com seu secret/jwks + iss + aud)::
+
+        validator = MultiValidator([
+            HubJWTValidator(secret=HUB_SECRET, issuer="inventia-hub",
+                            audience="inventia-spokes"),
+            HubJWTValidator(jwks_url=KC_CERTS, issuer=KC_ISSUER,
+                            audience=RS_URL, required_token_type=None),
+        ])
+
+    Semântica: tenta cada validador na ordem; em ``InvalidToken`` (token não é
+    deste emissor — assinatura/iss/aud/alg/kid) tenta o próximo. Erros de
+    AUTORIZAÇÃO (``TenantMismatch`` etc.) são DEFINITIVOS e propagam na hora —
+    um token validamente assinado mas no tenant errado não deve "passar" por
+    outro validador. Se todos derem ``InvalidToken``, relança o último.
+    """
+
+    validators: list[HubJWTValidator]
+
+    def __post_init__(self) -> None:
+        if not self.validators:
+            raise ValueError("MultiValidator requires at least one validator")
+
+    def validate_any(self, token: str, *, tenant_id: UUID | None = None) -> SpokePrincipal:
+        last: InvalidToken | None = None
+        for v in self.validators:
+            try:
+                return v.validate_any(token, tenant_id=tenant_id)
+            except AuthorizationError:
+                raise  # 403 definitivo — não tenta outro emissor
+            except InvalidToken as exc:
+                last = exc
+                continue
+        raise last or InvalidToken("no validator matched the token")
+
+    def validate_user_token(self, token: str, *, tenant_id: UUID | None = None) -> SpokePrincipal:
+        last: InvalidToken | None = None
+        for v in self.validators:
+            try:
+                return v.validate_user_token(token, tenant_id=tenant_id)
+            except AuthorizationError:
+                raise
+            except InvalidToken as exc:
+                last = exc
+                continue
+        raise last or InvalidToken("no validator matched the token")
+
+    def validate_client_token(self, token: str, *, tenant_id: UUID | None = None) -> SpokePrincipal:
+        last: InvalidToken | None = None
+        for v in self.validators:
+            try:
+                return v.validate_client_token(token, tenant_id=tenant_id)
+            except AuthorizationError:
+                raise
+            except InvalidToken as exc:
+                last = exc
+                continue
+        raise last or InvalidToken("no validator matched the token")
 
 
 def _maybe_uuid(value: Any) -> UUID | None:

@@ -18,6 +18,13 @@ não era cross-checado contra o token.
   eles DEVEM bater — senão `TenantMismatch`. Flags `enforce_tenant_match`
   (default `True`) e `require_tenant_claim` (default `False`, para a transição
   HS256→Keycloak).
+- **`MultiValidator` (Fase 6 — dual-validate)** — valida um token contra vários
+  `HubJWTValidator` (ex.: Hub HS256 + Keycloak RS256/JWKS) tentando cada um;
+  faz fallback em `InvalidToken` (emissor errado) mas propaga erros de
+  autorização (`TenantMismatch`) na hora. Habilita o cutover do strangler.
+- **`db.assert_rls_enforceable(session, strict=)` (Fase 6)** — detecta role de
+  conexão SUPERUSER/BYPASSRLS (que ignora RLS — risco R-2b); `strict=True`
+  levanta (fail-closed em prod), senão loga warning. No-op fora de PostgreSQL.
 - **MCP / Resource Server discovery (Fase 5)** — `inventia_spoke_sdk.mcp`:
   `protected_resource_metadata` / `mount_protected_resource_metadata`
   (RFC 9728 `/.well-known/oauth-protected-resource`) e

@@ -38,7 +38,7 @@ from inventia_spoke_sdk.exceptions import (
     TenantMismatch,
 )
 from inventia_spoke_sdk.jwks import JWKSFetcher
-from inventia_spoke_sdk.jwt_validator import HubJWTValidator
+from inventia_spoke_sdk.jwt_validator import HubJWTValidator, MultiValidator
 from inventia_spoke_sdk.mcp import (
     mount_protected_resource_metadata,
     protected_resource_challenge,
@@ -52,6 +52,7 @@ __all__ = [
     "__version__",
     # JWT / principal (v0.1.0+)
     "HubJWTValidator",
+    "MultiValidator",
     "JWKSFetcher",
     "SpokePrincipal",
     "SpokeSDKError",
