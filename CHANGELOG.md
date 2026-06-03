@@ -18,6 +18,12 @@ não era cross-checado contra o token.
   eles DEVEM bater — senão `TenantMismatch`. Flags `enforce_tenant_match`
   (default `True`) e `require_tenant_claim` (default `False`, para a transição
   HS256→Keycloak).
+- **MCP / Resource Server discovery (Fase 5)** — `inventia_spoke_sdk.mcp`:
+  `protected_resource_metadata` / `mount_protected_resource_metadata`
+  (RFC 9728 `/.well-known/oauth-protected-resource`) e
+  `protected_resource_challenge` (header `WWW-Authenticate` apontando para o
+  metadata). O RS publica seu `aud` + AS(es) + escopos; o enforcement reusa as
+  5 camadas.
 - **Claim `scope` (string OIDC/Keycloak)** unido a `scopes` (lista, Hub legacy)
   em `SpokePrincipal.scopes` — o SDK valida tanto tokens HS256 do Hub quanto
   RS256 do Keycloak (Fase 1, AS canônico).

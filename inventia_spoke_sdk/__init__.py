@@ -39,6 +39,11 @@ from inventia_spoke_sdk.exceptions import (
 )
 from inventia_spoke_sdk.jwks import JWKSFetcher
 from inventia_spoke_sdk.jwt_validator import HubJWTValidator
+from inventia_spoke_sdk.mcp import (
+    mount_protected_resource_metadata,
+    protected_resource_challenge,
+    protected_resource_metadata,
+)
 from inventia_spoke_sdk.principal import SpokePrincipal
 from inventia_spoke_sdk.services import BaseService
 from inventia_spoke_sdk.version import __version__
@@ -64,6 +69,10 @@ __all__ = [
     "assert_company_allowed",
     "require_scope",
     "install_auth_exception_handlers",
+    # MCP / Resource Server discovery (v0.6.0, Fase 5)
+    "protected_resource_metadata",
+    "mount_protected_resource_metadata",
+    "protected_resource_challenge",
     # Session + Service layer (v0.5.0+)
     "BaseService",
     "SessionFactoryResolver",
