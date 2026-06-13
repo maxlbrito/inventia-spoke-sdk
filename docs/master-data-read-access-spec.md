@@ -103,14 +103,27 @@ fora do escopo desta spec de leitura.
 | Fase | Onde | Entrega |
 |---|---|---|
 | 1 (feito) | SDK | read-models + `MasterDataRepository` (company/product/unit) |
-| 2 | SDK | participants + guarda de drift de schema no CI |
-| 3 | outbound-nfe | piloto: ler emitente/produtos via repo; enxugar `company_nfe` |
+| 2 (feito) | SDK | participants, certificado (metadados), referências IBGE/CNAE + `assert_no_drift` |
+| 3 | master-data | CI chama `assert_no_drift(schema)`; piloto outbound-nfe (ler via repo, enxugar `company_nfe`) |
 | 4 | demais consumidores | migrar leitura; aposentar caminhos HTTP de leitura |
 | — | master-data | (opcional) `GRANT SELECT`/RLS por papel para reforçar read-only |
+
+### Cobertura atual do `MasterDataRepository`
+
+- Company: `get_company`, `get_company_by_tax_id`, `list_companies`
+- Product: `get_product`, `get_product_by_code`, `list_products_by_codes`, `list_products`
+- Unit: `get_unit`, `list_units`
+- Participant: `get_participant`, `get_participant_by_cnpj`, `get_participant_by_cpf`, `list_participants`
+- Certificate (metadados): `get_active_certificate` (sem pfx/senha)
+- Referência global: `get_municipality`, `get_cnae`
 
 ## 11. Decisões em aberto
 
 1. Gestão da chave do certificado: segredo compartilhado para o signatário vs
-   assinatura sempre no master-data.
+   assinatura sempre no master-data. (Leitura de **metadados** já disponível via
+   `get_active_certificate`; material cifrado segue fora deste caminho.)
 2. Reforço físico de read-only: `GRANT`/RLS por papel vs só convenção.
-3. Guarda de drift: comparar contra OpenAPI/migrations do master-data, ou reflection.
+3. ~~Guarda de drift~~ **RESOLVIDO**: `masterdata.assert_no_drift(schema)` —
+   a CI do master-data passa o schema real (do seu `MetaData`) e a função
+   verifica que as colunas dos read-models são subconjunto. Falta só ligar essa
+   chamada no CI do master-data (Fase 3).
