@@ -1,9 +1,8 @@
 """Read-models do cadastro do master-data — leitura no banco COMPARTILHADO.
 
 Na arquitetura da casa, master-data e os spokes resolvem o MESMO ``db_url`` por
-account (1 Account = 1 banco). As tabelas de cadastro (``companies``,
-``products``, ``units_of_measure``) já vivem no banco que o spoke abre — não há
-réplica, não há cópia, não há HTTP no caminho de leitura.
+account (1 Account = 1 banco). As tabelas de cadastro já vivem no banco que o
+spoke abre — não há réplica, não há cópia, não há HTTP no caminho de leitura.
 
 Estes models são **somente leitura** e usam um ``MetaData`` próprio
 (``ReadBase.metadata``), ISOLADO do ``Base`` do spoke. NUNCA inclua este metadata
@@ -11,8 +10,13 @@ no ``autogenerate``/``create_all`` do seu Alembic — as tabelas pertencem ao
 master-data; tentar migrá-las a partir de um spoke é erro. Escrita é exclusiva
 do master-data.
 
-Mapeiam um SUBCONJUNTO das colunas (as que os consumidores precisam). ``SELECT``
-só pelas colunas mapeadas; adicionar colunas no master-data não quebra a leitura.
+Mapeiam um SUBCONJUNTO das colunas. ``SELECT`` só pelas colunas mapeadas; o
+master-data adicionar colunas não quebra a leitura. A guarda de drift
+(``masterdata.drift``) protege contra o caso inverso (remover/renomear coluna).
+
+Convenções:
+- entidades por-tenant: têm ``tenant_id``, ``is_active`` e ``updated_at``;
+- tabelas de referência global (IBGE/CNAE): sem ``tenant_id`` (PK natural).
 """
 
 from __future__ import annotations
@@ -32,6 +36,9 @@ class ReadBase(DeclarativeBase):
     """
 
     metadata = MetaData()
+
+
+# --- Entidades por-tenant ---------------------------------------------------
 
 
 class Company(ReadBase):
@@ -54,6 +61,8 @@ class Company(ReadBase):
     address_city: Mapped[str | None] = mapped_column(String(100))
     address_state: Mapped[str | None] = mapped_column(String(2))
     ibge_city_code: Mapped[str | None] = mapped_column(String(7))
+    phone: Mapped[str | None] = mapped_column(String(30))
+    email: Mapped[str | None] = mapped_column(String(320))
     is_active: Mapped[bool] = mapped_column(Boolean)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -86,3 +95,77 @@ class UnitOfMeasure(ReadBase):
     unit_type: Mapped[str | None] = mapped_column(String(20))
     is_active: Mapped[bool] = mapped_column(Boolean)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Participant(ReadBase):
+    """Fornecedores/clientes/transportadoras (EFD 0150)."""
+
+    __tablename__ = "participants"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    tax_id_type: Mapped[str] = mapped_column(String(10))  # cnpj | cpf | foreign
+    cnpj: Mapped[str | None] = mapped_column(String(14))
+    cpf: Mapped[str | None] = mapped_column(String(11))
+    foreign_tax_id: Mapped[str | None] = mapped_column(String(60))
+    legal_name: Mapped[str] = mapped_column(String(200))
+    trade_name: Mapped[str | None] = mapped_column(String(200))
+    state_registration: Mapped[str | None] = mapped_column(String(30))
+    municipal_registration: Mapped[str | None] = mapped_column(String(30))
+    address_zip: Mapped[str | None] = mapped_column(String(10))
+    address_street: Mapped[str | None] = mapped_column(String(300))
+    address_number: Mapped[str | None] = mapped_column(String(20))
+    address_district: Mapped[str | None] = mapped_column(String(100))
+    address_city: Mapped[str | None] = mapped_column(String(100))
+    address_state: Mapped[str | None] = mapped_column(String(2))
+    ibge_city_code: Mapped[str | None] = mapped_column(String(7))
+    is_active: Mapped[bool] = mapped_column(Boolean)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Certificate(ReadBase):
+    """Certificado digital — SOMENTE METADADOS.
+
+    ``pfx_encrypted``/``password_encrypted`` (cifrados com a chave Fernet do
+    master-data) NÃO são mapeados de propósito: material sensível não trafega por
+    este caminho de leitura. Útil para checar presença/validade
+    (``expires_at``) sem HTTP. Decifrar/assinar é decisão de gestão de chave,
+    fora deste módulo (ver spec §7).
+    """
+
+    __tablename__ = "certificates"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    company_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    cnpj: Mapped[str] = mapped_column(String(20))
+    thumbprint: Mapped[str | None] = mapped_column(String(64))
+    issuer_name: Mapped[str | None] = mapped_column(String(300))
+    subject_name: Mapped[str | None] = mapped_column(String(300))
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column(Boolean)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+# --- Referência global (sem tenant_id) --------------------------------------
+
+
+class IbgeMunicipality(ReadBase):
+    __tablename__ = "ibge_municipalities"
+
+    ibge_code: Mapped[str] = mapped_column(String(7), primary_key=True)
+    name: Mapped[str] = mapped_column(String(150))
+    state_code: Mapped[str] = mapped_column(String(2), index=True)
+    state_name: Mapped[str] = mapped_column(String(50))
+
+
+class CnaeCode(ReadBase):
+    __tablename__ = "cnae_codes"
+
+    cnae_code: Mapped[str] = mapped_column(String(7), primary_key=True)
+    description: Mapped[str] = mapped_column(String(300))
+    section: Mapped[str] = mapped_column(String(1))
+    division: Mapped[str] = mapped_column(String(2))
+    group_code: Mapped[str] = mapped_column(String(3))
+    class_code: Mapped[str] = mapped_column(String(5))
