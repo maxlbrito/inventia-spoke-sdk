@@ -20,3 +20,4 @@ Refactor interno, rename de variável privada, bump de minor → **não** precis
 - [0001 — AsyncSession já é Unit of Work; sem wrapper](0001-no-iunitofwork-asyncsession-is-uow.md)
 - [0002 — SessionFactoryResolver pattern para multi-tenant](0002-session-factory-resolver-pattern.md)
 - [0003 — OpenTelemetry helpers como opt-in extra](0003-otel-helpers-opt-in-extra.md)
+- [0004 — Acesso de leitura ao cadastro do master-data (banco compartilhado)](0004-master-data-read-access.md)
