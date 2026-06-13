@@ -113,6 +113,32 @@ async def run_companies_import(ctx, job_id, tenant_id, access_token):
 
 Para testes, ver `inventia_spoke_sdk.testing` (rollback-per-test e cross-tenant resolver).
 
+### Cadastro do master-data (leitura compartilhada)
+
+Na topologia da casa (1 Account = 1 banco), o cadastro do master-data
+(`companies`, `products`, `units_of_measure`, `participants`, `certificates` e
+referências IBGE/CNAE) vive no **mesmo banco** que o spoke já abre. O SDK dá
+leitura direta, tenant-scoped, **sem HTTP e sem réplica** — então a queda do
+serviço HTTP do master-data não derruba a leitura. Ver ADR 0004.
+
+```python
+from inventia_spoke_sdk import session_for
+from inventia_spoke_sdk.masterdata import MasterDataRepository
+
+repo = MasterDataRepository()
+async with session_for(principal) as session:
+    emit = await repo.get_company(session, tenant_id=tid, company_id=cid)
+    dest = await repo.get_participant_by_cnpj(session, tenant_id=tid, cnpj=cnpj)
+    prods = await repo.list_products_by_codes(session, tenant_id=tid, codes=codes)
+    un = await repo.get_unit(session, tenant_id=tid, unit_code="UN")
+    muni = await repo.get_municipality(session, ibge_code="3550308")  # global
+```
+
+Regras: **somente leitura** (escrita do cadastro é exclusiva do master-data);
+toda query por-tenant filtra `tenant_id`; **não** inclua `ReadBase.metadata` no
+Alembic do spoke (as tabelas pertencem ao master-data). A CI do master-data
+chama `masterdata.assert_no_drift(schema)` para travar drift de schema.
+
 ## API pública (v0.1.0)
 
 | Símbolo | Descrição |
