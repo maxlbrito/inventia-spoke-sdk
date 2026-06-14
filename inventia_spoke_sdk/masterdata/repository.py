@@ -184,17 +184,39 @@ class MasterDataRepository:
     async def get_active_certificate(
         self, session: AsyncSession, *, tenant_id: str | UUID, company_id: str | UUID
     ) -> Certificate | None:
-        """Certificado ativo da empresa — apenas metadados (sem pfx/senha).
+        """Certificado ativo MAIS RECENTE da empresa — só metadados (sem pfx/senha).
 
-        Útil para checar presença/validade sem HTTP. Material sensível não é
-        exposto por este caminho.
+        Desde o multi-certificado (master-data), uma empresa pode ter mais de um
+        certificado ativo; este método devolve o de ``issued_at`` mais recente
+        (determinístico, nunca levanta). Para a lista completa use
+        ``list_active_certificates``. Material sensível não é exposto por aqui.
         """
-        stmt = select(Certificate).where(
-            Certificate.tenant_id == _as_uuid(tenant_id),
-            Certificate.company_id == _as_uuid(company_id),
-            Certificate.is_active.is_(True),
+        stmt = (
+            select(Certificate)
+            .where(
+                Certificate.tenant_id == _as_uuid(tenant_id),
+                Certificate.company_id == _as_uuid(company_id),
+                Certificate.is_active.is_(True),
+            )
+            .order_by(Certificate.issued_at.desc())
+            .limit(1)
         )
-        return (await session.execute(stmt)).scalar_one_or_none()
+        return (await session.execute(stmt)).scalars().first()
+
+    async def list_active_certificates(
+        self, session: AsyncSession, *, tenant_id: str | UUID, company_id: str | UUID
+    ) -> Sequence[Certificate]:
+        """Todos os certificados ativos da empresa (mais recente primeiro)."""
+        stmt = (
+            select(Certificate)
+            .where(
+                Certificate.tenant_id == _as_uuid(tenant_id),
+                Certificate.company_id == _as_uuid(company_id),
+                Certificate.is_active.is_(True),
+            )
+            .order_by(Certificate.issued_at.desc())
+        )
+        return (await session.execute(stmt)).scalars().all()
 
     # --- Referência global (sem tenant) -------------------------------------
 

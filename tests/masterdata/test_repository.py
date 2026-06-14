@@ -308,6 +308,29 @@ async def test_get_active_certificate_missing(session, repo) -> None:
     )
 
 
+async def test_multiple_active_certificates(session, repo) -> None:
+    # multi-cert: empresa com >1 certificado ATIVO não pode quebrar (era
+    # scalar_one_or_none). get_active_certificate devolve o de issued_at maior.
+    session.add(
+        Certificate(
+            id=uuid4(),
+            tenant_id=TENANT_A,
+            company_id=COMPANY_A,
+            cnpj="11222333000181",
+            thumbprint="CD34",
+            issued_at=datetime(2027, 1, 1, tzinfo=UTC),  # mais recente que o AB12 (NOW)
+            expires_at=LATER,
+            is_active=True,
+            updated_at=NOW,
+        )
+    )
+    await session.commit()
+    cert = await repo.get_active_certificate(session, tenant_id=TENANT_A, company_id=COMPANY_A)
+    assert cert is not None and cert.thumbprint == "CD34"  # mais recente, sem levantar
+    allc = await repo.list_active_certificates(session, tenant_id=TENANT_A, company_id=COMPANY_A)
+    assert {c.thumbprint for c in allc} == {"AB12", "CD34"}
+
+
 # --- Referência global -----------------------------------------------------
 
 
