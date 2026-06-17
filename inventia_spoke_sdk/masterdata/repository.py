@@ -241,12 +241,8 @@ class MasterDataRepository:
         )
         return (await session.execute(stmt)).scalars().all()
 
-    async def _tenant_cert_key(
-        self, session: AsyncSession, tenant_id: str | UUID
-    ) -> str | None:
-        stmt = select(CertificateKey.key).where(
-            CertificateKey.tenant_id == _as_uuid(tenant_id)
-        )
+    async def _tenant_cert_key(self, session: AsyncSession, tenant_id: str | UUID) -> str | None:
+        stmt = select(CertificateKey.key).where(CertificateKey.tenant_id == _as_uuid(tenant_id))
         return (await session.execute(stmt)).scalar_one_or_none()
 
     async def get_active_certificate_material(
@@ -271,9 +267,7 @@ class MasterDataRepository:
         key = await self._tenant_cert_key(session, tenant_id)
         if not key:
             raise CertificateKeyMissing(str(_as_uuid(tenant_id)))
-        pfx_bytes, password_bytes = decrypt_tokens(
-            key, cert.pfx_encrypted, cert.password_encrypted
-        )
+        pfx_bytes, password_bytes = decrypt_tokens(key, cert.pfx_encrypted, cert.password_encrypted)
         return CertificateMaterial(
             company_id=cert.company_id,
             cnpj=cert.cnpj,

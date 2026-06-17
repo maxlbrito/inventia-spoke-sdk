@@ -386,9 +386,7 @@ async def test_get_active_certificate_material_decrypts(session, repo) -> None:
 
 async def test_material_none_when_no_active_certificate(session, repo) -> None:
     assert (
-        await repo.get_active_certificate_material(
-            session, tenant_id=TENANT_A, company_id=uuid4()
-        )
+        await repo.get_active_certificate_material(session, tenant_id=TENANT_A, company_id=uuid4())
         is None
     )
 
