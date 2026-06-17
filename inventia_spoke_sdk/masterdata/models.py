@@ -53,6 +53,10 @@ class Company(ReadBase):
     municipal_registration: Mapped[str | None] = mapped_column(String(30))
     tax_regime: Mapped[str | None] = mapped_column(String(30))
     pis_cofins_regime: Mapped[str | None] = mapped_column(String(30))
+    # Perfil fiscal (master-data #240 / migration 0018) — base do motor fiscal.
+    contribuinte_ipi: Mapped[bool | None] = mapped_column(Boolean)
+    pis_cofins_metodo_apropriacao: Mapped[str | None] = mapped_column(String(10))
+    regime_especial: Mapped[str | None] = mapped_column(String(40))
     address_zip: Mapped[str | None] = mapped_column(String(10))
     address_street: Mapped[str | None] = mapped_column(String(300))
     address_number: Mapped[str | None] = mapped_column(String(20))
@@ -119,18 +123,21 @@ class Participant(ReadBase):
     address_city: Mapped[str | None] = mapped_column(String(100))
     address_state: Mapped[str | None] = mapped_column(String(2))
     ibge_city_code: Mapped[str | None] = mapped_column(String(7))
+    # CNAE da contraparte (master-data #240 / migration 0018) — perfil origem/destino.
+    cnae_code: Mapped[str | None] = mapped_column(String(7))
     is_active: Mapped[bool] = mapped_column(Boolean)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Certificate(ReadBase):
-    """Certificado digital — SOMENTE METADADOS.
+    """Certificado digital A1 — metadados + material cifrado em repouso.
 
-    ``pfx_encrypted``/``password_encrypted`` (cifrados com a chave Fernet do
-    master-data) NÃO são mapeados de propósito: material sensível não trafega por
-    este caminho de leitura. Útil para checar presença/validade
-    (``expires_at``) sem HTTP. Decifrar/assinar é decisão de gestão de chave,
-    fora deste módulo (ver spec §7).
+    ``pfx_encrypted``/``password_encrypted`` são cifrados com a chave Fernet
+    **per-tenant** (``CertificateKey``, no próprio banco do account). Não use estes
+    campos diretamente — passe por
+    ``MasterDataRepository.get_active_certificate_material``, que lê a chave e
+    decifra in-process, sem depender do serviço master-data nem do Hub (Cenário 1).
+    Para só checar presença/validade use ``get_active_certificate`` (metadados).
     """
 
     __tablename__ = "certificates"
@@ -139,6 +146,8 @@ class Certificate(ReadBase):
     tenant_id: Mapped[UUID] = mapped_column(Uuid, index=True)
     company_id: Mapped[UUID] = mapped_column(Uuid, index=True)
     cnpj: Mapped[str] = mapped_column(String(20))
+    pfx_encrypted: Mapped[str] = mapped_column(String)
+    password_encrypted: Mapped[str] = mapped_column(String)
     thumbprint: Mapped[str | None] = mapped_column(String(64))
     issuer_name: Mapped[str | None] = mapped_column(String(300))
     subject_name: Mapped[str | None] = mapped_column(String(300))
@@ -146,6 +155,20 @@ class Certificate(ReadBase):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(Boolean)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CertificateKey(ReadBase):
+    """Chave Fernet **per-tenant** que cifra os certificados A1 (read-model).
+
+    Mora no próprio banco do account (master-data `certificate_crypto_keys`, sob
+    RLS). Lida junto com o ciphertext, na mesma sessão, para decifrar in-process.
+    Material sensível: nunca exponha o ``key`` fora do SDK.
+    """
+
+    __tablename__ = "certificate_crypto_keys"
+
+    tenant_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    key: Mapped[str] = mapped_column(String)
 
 
 # --- Referência global (sem tenant_id) --------------------------------------

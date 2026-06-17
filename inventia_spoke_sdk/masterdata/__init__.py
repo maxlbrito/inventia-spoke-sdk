@@ -20,6 +20,10 @@ A guarda de drift (``assert_no_drift``) é chamada pela CI do master-data.
 
 from __future__ import annotations
 
+from inventia_spoke_sdk.masterdata.crypto import (
+    CertificateDecryptError,
+    CertificateKeyMissing,
+)
 from inventia_spoke_sdk.masterdata.drift import (
     SchemaDriftError,
     assert_no_drift,
@@ -27,6 +31,7 @@ from inventia_spoke_sdk.masterdata.drift import (
 )
 from inventia_spoke_sdk.masterdata.models import (
     Certificate,
+    CertificateKey,
     CnaeCode,
     Company,
     IbgeMunicipality,
@@ -35,10 +40,17 @@ from inventia_spoke_sdk.masterdata.models import (
     ReadBase,
     UnitOfMeasure,
 )
-from inventia_spoke_sdk.masterdata.repository import MasterDataRepository
+from inventia_spoke_sdk.masterdata.repository import (
+    CertificateMaterial,
+    MasterDataRepository,
+)
 
 __all__ = [
     "Certificate",
+    "CertificateDecryptError",
+    "CertificateKey",
+    "CertificateKeyMissing",
+    "CertificateMaterial",
     "CnaeCode",
     "Company",
     "IbgeMunicipality",
