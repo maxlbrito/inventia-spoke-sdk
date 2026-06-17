@@ -13,13 +13,20 @@ master-data não afeta estas leituras — a única dependência é o Postgres.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from inventia_spoke_sdk.masterdata.crypto import (
+    CertificateKeyMissing,
+    decrypt_tokens,
+)
 from inventia_spoke_sdk.masterdata.models import (
     Certificate,
+    CertificateKey,
     CnaeCode,
     Company,
     IbgeMunicipality,
@@ -31,6 +38,22 @@ from inventia_spoke_sdk.masterdata.models import (
 
 def _as_uuid(value: str | UUID) -> UUID:
     return value if isinstance(value, UUID) else UUID(str(value))
+
+
+@dataclass(frozen=True)
+class CertificateMaterial:
+    """Material do certificado A1 já decifrado (pronto para assinar).
+
+    Devolvido por ``get_active_certificate_material`` — o consumidor não conhece
+    Fernet nem a chave: recebe os bytes do PFX e a senha em claro.
+    """
+
+    company_id: UUID
+    cnpj: str
+    pfx_bytes: bytes
+    password: str
+    expires_at: datetime
+    thumbprint: str | None
 
 
 class MasterDataRepository:
@@ -217,6 +240,48 @@ class MasterDataRepository:
             .order_by(Certificate.issued_at.desc())
         )
         return (await session.execute(stmt)).scalars().all()
+
+    async def _tenant_cert_key(
+        self, session: AsyncSession, tenant_id: str | UUID
+    ) -> str | None:
+        stmt = select(CertificateKey.key).where(
+            CertificateKey.tenant_id == _as_uuid(tenant_id)
+        )
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    async def get_active_certificate_material(
+        self, session: AsyncSession, *, tenant_id: str | UUID, company_id: str | UUID
+    ) -> CertificateMaterial | None:
+        """Certificado ativo mais recente da empresa, **decifrado** (PFX + senha).
+
+        Encapsula tudo: lê o ciphertext + a chave Fernet per-tenant no MESMO banco
+        do account e decifra in-process. Não depende do serviço master-data nem do
+        Hub — só do Postgres (assinar continua com o master-data fora, Cenário 1).
+
+        Devolve ``None`` se a empresa não tem certificado ativo. Levanta
+        ``CertificateKeyMissing`` se há certificado mas falta a chave do tenant
+        (estado inconsistente — checar a migração relocate-first do master-data),
+        e ``CertificateDecryptError`` se a chave não decifra o material.
+        """
+        cert = await self.get_active_certificate(
+            session, tenant_id=tenant_id, company_id=company_id
+        )
+        if cert is None:
+            return None
+        key = await self._tenant_cert_key(session, tenant_id)
+        if not key:
+            raise CertificateKeyMissing(str(_as_uuid(tenant_id)))
+        pfx_bytes, password_bytes = decrypt_tokens(
+            key, cert.pfx_encrypted, cert.password_encrypted
+        )
+        return CertificateMaterial(
+            company_id=cert.company_id,
+            cnpj=cert.cnpj,
+            pfx_bytes=pfx_bytes,
+            password=password_bytes.decode(),
+            expires_at=cert.expires_at,
+            thumbprint=cert.thumbprint,
+        )
 
     # --- Referência global (sem tenant) -------------------------------------
 

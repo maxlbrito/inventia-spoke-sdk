@@ -18,9 +18,34 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Protocol
 
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from inventia_spoke_sdk.principal import SpokePrincipal
+
+# GUC de sessão lido pela RLS por-tenant do master-data (tabelas no banco do
+# account). Espelha o `app.current_tenant` que o master-data seta no seu db_pool.
+_TENANT_GUC = "app.current_tenant"
+
+
+def _bind_tenant_guc(session: AsyncSession, principal: SpokePrincipal) -> None:
+    """Aplica ``SET LOCAL app.current_tenant`` em cada transação da sessão.
+
+    Necessário para ler as tabelas do master-data sob RLS (deny-by-default sem o
+    GUC). Transaction-local (``is_local=true``) — nunca vaza para a próxima
+    transação/conexão do pool. No-op fora do PostgreSQL ou sem ``tenant_id``.
+    """
+    if principal.tenant_id is None:
+        return
+    tid = str(principal.tenant_id)
+
+    @event.listens_for(session.sync_session, "after_begin")
+    def _set_guc(_sess: object, _txn: object, connection: object) -> None:
+        if connection.dialect.name != "postgresql":  # type: ignore[attr-defined]
+            return
+        connection.execute(  # type: ignore[attr-defined]
+            text(f"SELECT set_config('{_TENANT_GUC}', :tid, true)"), {"tid": tid}
+        )
 
 
 class SessionFactoryResolver(Protocol):
@@ -81,4 +106,5 @@ async def session_for(principal: SpokePrincipal) -> AsyncIterator[AsyncSession]:
     resolver = get_session_resolver()
     factory = await resolver(principal)
     async with factory() as session:
+        _bind_tenant_guc(session, principal)
         yield session

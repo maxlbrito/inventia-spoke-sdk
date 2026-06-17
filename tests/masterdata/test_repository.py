@@ -12,11 +12,14 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from inventia_spoke_sdk.masterdata import (
     Certificate,
+    CertificateKey,
+    CertificateKeyMissing,
     CnaeCode,
     Company,
     IbgeMunicipality,
@@ -36,6 +39,14 @@ PART_A = uuid4()
 NOW = datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC)
 LATER = datetime(2030, 1, 1, 0, 0, 0, tzinfo=UTC)
 
+# Material do cert cifrado com a chave per-tenant de TENANT_A.
+KEY_A = Fernet.generate_key().decode()
+_FERNET_A = Fernet(KEY_A.encode())
+PFX_A = b"\x00PFX-BYTES\x01"
+PWD_A = "senha-do-pfx"
+PFX_A_ENC = _FERNET_A.encrypt(PFX_A).decode()
+PWD_A_ENC = _FERNET_A.encrypt(PWD_A.encode()).decode()
+
 
 @pytest.fixture
 async def session() -> AsyncSession:
@@ -52,6 +63,9 @@ async def session() -> AsyncSession:
                 legal_name="ACME LTDA",
                 state_registration="123456",
                 tax_regime="real",
+                contribuinte_ipi=True,
+                pis_cofins_metodo_apropriacao="rateio",
+                regime_especial="ZFM",
                 address_city="São Paulo",
                 address_state="SP",
                 is_active=True,
@@ -125,6 +139,7 @@ async def session() -> AsyncSession:
                 cnpj="44555666000177",
                 legal_name="Fornecedor X SA",
                 address_state="RJ",
+                cnae_code="4711301",
                 is_active=True,
                 updated_at=NOW,
             )
@@ -146,12 +161,17 @@ async def session() -> AsyncSession:
                 tenant_id=TENANT_A,
                 company_id=COMPANY_A,
                 cnpj="11222333000181",
+                pfx_encrypted=PFX_A_ENC,
+                password_encrypted=PWD_A_ENC,
                 thumbprint="AB12",
                 issued_at=NOW,
                 expires_at=LATER,
                 is_active=True,
                 updated_at=NOW,
             )
+        )
+        s.add(
+            CertificateKey(tenant_id=TENANT_A, key=KEY_A),
         )
         s.add(
             IbgeMunicipality(
@@ -297,9 +317,9 @@ async def test_get_active_certificate(session, repo) -> None:
     cert = await repo.get_active_certificate(session, tenant_id=TENANT_A, company_id=COMPANY_A)
     # expires_at: SQLite devolve naive; comparamos pelo ano (em produção é tz-aware)
     assert cert is not None and cert.thumbprint == "AB12" and cert.expires_at.year == 2030
-    # material sensível NÃO é exposto pelo read-model
-    assert not hasattr(cert, "pfx_encrypted")
-    assert not hasattr(cert, "password_encrypted")
+    # material agora é mapeado (cifrado) — mas só deve ser usado via material()
+    assert cert.pfx_encrypted == PFX_A_ENC
+    assert cert.password_encrypted == PWD_A_ENC
 
 
 async def test_get_active_certificate_missing(session, repo) -> None:
@@ -317,6 +337,8 @@ async def test_multiple_active_certificates(session, repo) -> None:
             tenant_id=TENANT_A,
             company_id=COMPANY_A,
             cnpj="11222333000181",
+            pfx_encrypted=PFX_A_ENC,
+            password_encrypted=PWD_A_ENC,
             thumbprint="CD34",
             issued_at=datetime(2027, 1, 1, tzinfo=UTC),  # mais recente que o AB12 (NOW)
             expires_at=LATER,
@@ -346,3 +368,67 @@ async def test_get_municipality_missing(session, repo) -> None:
 async def test_get_cnae(session, repo) -> None:
     c = await repo.get_cnae(session, cnae_code="4711301")
     assert c is not None and c.section == "G"
+
+
+# --- Certificate (material decifrado) --------------------------------------
+
+
+async def test_get_active_certificate_material_decrypts(session, repo) -> None:
+    mat = await repo.get_active_certificate_material(
+        session, tenant_id=TENANT_A, company_id=COMPANY_A
+    )
+    assert mat is not None
+    assert mat.pfx_bytes == PFX_A  # decifrado in-process com a chave per-tenant
+    assert mat.password == PWD_A
+    assert mat.cnpj == "11222333000181"
+    assert mat.thumbprint == "AB12"
+
+
+async def test_material_none_when_no_active_certificate(session, repo) -> None:
+    assert (
+        await repo.get_active_certificate_material(
+            session, tenant_id=TENANT_A, company_id=uuid4()
+        )
+        is None
+    )
+
+
+async def test_material_raises_when_key_missing(session, repo) -> None:
+    # cert existe mas o tenant não tem chave → estado inconsistente, levanta.
+    other_tenant, other_company = uuid4(), uuid4()
+    session.add(
+        Certificate(
+            id=uuid4(),
+            tenant_id=other_tenant,
+            company_id=other_company,
+            cnpj="00000000000191",
+            pfx_encrypted=PFX_A_ENC,
+            password_encrypted=PWD_A_ENC,
+            thumbprint="ZZ99",
+            issued_at=NOW,
+            expires_at=LATER,
+            is_active=True,
+            updated_at=NOW,
+        )
+    )
+    await session.commit()
+    with pytest.raises(CertificateKeyMissing):
+        await repo.get_active_certificate_material(
+            session, tenant_id=other_tenant, company_id=other_company
+        )
+
+
+# --- Campos fiscais (master-data #240) -------------------------------------
+
+
+async def test_company_fiscal_profile_fields(session, repo) -> None:
+    c = await repo.get_company(session, tenant_id=TENANT_A, company_id=COMPANY_A)
+    assert c is not None
+    assert c.contribuinte_ipi is True
+    assert c.pis_cofins_metodo_apropriacao == "rateio"
+    assert c.regime_especial == "ZFM"
+
+
+async def test_participant_cnae_code(session, repo) -> None:
+    p = await repo.get_participant(session, tenant_id=TENANT_A, participant_id=PART_A)
+    assert p is not None and p.cnae_code == "4711301"

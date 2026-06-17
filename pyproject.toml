@@ -1,6 +1,6 @@
 [project]
 name = "inventia-spoke-sdk"
-version = "0.7.1"
+version = "0.8.0"
 description = "Inventia Spoke SDK — JWT validation, SpokePrincipal, session factory + BaseService for the Hub↔Spoke contract."
 authors = [{ name = "Max Brito", email = "maxlbrito@inventia.com.br" }]
 readme = "README.md"
@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 fastapi = ["fastapi>=0.110"]
+masterdata = ["cryptography>=42.0"]
 testing = ["pytest>=8.3", "pytest-asyncio>=0.24", "aiosqlite>=0.19"]
 dev = [
     "pytest>=8.3",
