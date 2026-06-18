@@ -28,6 +28,7 @@ from inventia_spoke_sdk.exceptions import (
 )
 from inventia_spoke_sdk.jwks import JWKSFetcher
 from inventia_spoke_sdk.jwt_validator import HubJWTValidator
+from inventia_spoke_sdk.outbox import Outbox, OutboxBase, enqueue
 from inventia_spoke_sdk.principal import SpokePrincipal
 from inventia_spoke_sdk.services import BaseService
 from inventia_spoke_sdk.version import __version__
@@ -49,4 +50,8 @@ __all__ = [
     "get_session_resolver",
     "reset_session_resolver",
     "session_for",
+    # Outbox transacional compartilhado (v0.9.0+)
+    "Outbox",
+    "OutboxBase",
+    "enqueue",
 ]
