@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from inventia_spoke_sdk.masterdata import (
+    SYSTEM_TENANT_ID,
     Certificate,
     CertificateKey,
     CertificateKeyMissing,
@@ -24,6 +25,7 @@ from inventia_spoke_sdk.masterdata import (
     Company,
     IbgeMunicipality,
     MasterDataRepository,
+    OperationNature,
     Participant,
     Product,
     ReadBase,
@@ -186,6 +188,77 @@ async def session() -> AsyncSession:
                 division="47",
                 group_code="471",
                 class_code="47113",
+            )
+        )
+        # operation_natures: seeds do sistema + do tenant (override + isolamento)
+        s.add(
+            OperationNature(
+                id=uuid4(),
+                tenant_id=SYSTEM_TENANT_ID,
+                nature_code="REVENDA",
+                name="Compra para comercialização (sistema)",
+                use_simplified_rule=False,
+                use_nature_cfop=False,
+                consequences_json={
+                    "default": {
+                        "cfop_by_direction": {"intra": "1102", "inter": "2102"},
+                        "icms": {"credit": True, "cst": "00", "bucket": "tributada"},
+                    }
+                },
+                is_active=True,
+                updated_at=NOW,
+            )
+        )
+        s.add(
+            OperationNature(
+                id=uuid4(),
+                tenant_id=SYSTEM_TENANT_ID,
+                nature_code="USO_CONSUMO",
+                name="Uso e consumo (sistema)",
+                use_simplified_rule=False,
+                use_nature_cfop=False,
+                consequences_json={"default": {"icms": {"credit": False}}},
+                is_active=False,  # inativa → não deve aparecer em active_only
+                updated_at=NOW,
+            )
+        )
+        s.add(
+            OperationNature(
+                id=uuid4(),
+                tenant_id=TENANT_A,
+                nature_code="REVENDA",  # override do tenant sobre o seed do sistema
+                name="Revenda customizada (tenant A)",
+                use_simplified_rule=False,
+                use_nature_cfop=False,
+                consequences_json={"default": {"icms": {"credit": False, "cst": "102"}}},
+                is_active=True,
+                updated_at=NOW,
+            )
+        )
+        s.add(
+            OperationNature(
+                id=uuid4(),
+                tenant_id=TENANT_A,
+                nature_code="MINHA_NAT",
+                name="Natureza própria (tenant A)",
+                use_simplified_rule=False,
+                use_nature_cfop=False,
+                consequences_json=None,
+                is_active=True,
+                updated_at=NOW,
+            )
+        )
+        s.add(
+            OperationNature(
+                id=uuid4(),
+                tenant_id=TENANT_B,
+                nature_code="DO_OUTRO",
+                name="Natureza do tenant B",
+                use_simplified_rule=False,
+                use_nature_cfop=False,
+                consequences_json=None,
+                is_active=True,
+                updated_at=NOW,
             )
         )
         await s.commit()
@@ -430,3 +503,51 @@ async def test_company_fiscal_profile_fields(session, repo) -> None:
 async def test_participant_cnae_code(session, repo) -> None:
     p = await repo.get_participant(session, tenant_id=TENANT_A, participant_id=PART_A)
     assert p is not None and p.cnae_code == "4711301"
+
+
+# --- OperationNature (EFD 0400) --------------------------------------------
+
+
+async def test_list_operation_natures_includes_system(session, repo) -> None:
+    nats = await repo.list_operation_natures(session, tenant_id=TENANT_A)
+    codes = sorted(n.nature_code for n in nats)
+    # tenant: MINHA_NAT + REVENDA(tenant); sistema: REVENDA → 'REVENDA' aparece 2x
+    assert codes == ["MINHA_NAT", "REVENDA", "REVENDA"]
+    # inativa do sistema (USO_CONSUMO) não entra; nada do tenant B vaza
+    assert "USO_CONSUMO" not in codes
+    assert "DO_OUTRO" not in codes
+
+
+async def test_list_operation_natures_exclude_system(session, repo) -> None:
+    nats = await repo.list_operation_natures(session, tenant_id=TENANT_A, include_system=False)
+    assert {n.nature_code for n in nats} == {"MINHA_NAT", "REVENDA"}
+    assert all(n.tenant_id == TENANT_A for n in nats)
+
+
+async def test_list_operation_natures_including_inactive(session, repo) -> None:
+    nats = await repo.list_operation_natures(session, tenant_id=TENANT_A, active_only=False)
+    assert "USO_CONSUMO" in {n.nature_code for n in nats}  # seed inativo do sistema
+
+
+async def test_get_operation_nature_tenant_overrides_system(session, repo) -> None:
+    n = await repo.get_operation_nature_by_code(session, tenant_id=TENANT_A, nature_code="REVENDA")
+    assert n is not None
+    assert n.tenant_id == TENANT_A  # a do tenant vence o seed do sistema
+    assert n.consequences_json == {"default": {"icms": {"credit": False, "cst": "102"}}}
+
+
+async def test_get_operation_nature_falls_back_to_system(session, repo) -> None:
+    # tenant B não tem REVENDA própria → recebe o seed do sistema
+    n = await repo.get_operation_nature_by_code(session, tenant_id=TENANT_B, nature_code="REVENDA")
+    assert n is not None and n.tenant_id == SYSTEM_TENANT_ID
+    # consequences_json (JSONB) volta como dict
+    assert n.consequences_json["default"]["icms"]["credit"] is True
+
+
+async def test_get_operation_nature_missing_returns_none(session, repo) -> None:
+    assert (
+        await repo.get_operation_nature_by_code(
+            session, tenant_id=TENANT_A, nature_code="INEXISTENTE"
+        )
+        is None
+    )

@@ -25,8 +25,12 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, MetaData, Numeric, String, Uuid
+from sqlalchemy import JSON, Boolean, DateTime, MetaData, Numeric, String, Uuid
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+# JSONB no Postgres (master-data) · JSON no SQLite (testes do SDK).
+_JSONB = JSONB().with_variant(JSON(), "sqlite")
 
 
 class ReadBase(DeclarativeBase):
@@ -125,6 +129,32 @@ class Participant(ReadBase):
     ibge_city_code: Mapped[str | None] = mapped_column(String(7))
     # CNAE da contraparte (master-data #240 / migration 0018) — perfil origem/destino.
     cnae_code: Mapped[str | None] = mapped_column(String(7))
+    is_active: Mapped[bool] = mapped_column(Boolean)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OperationNature(ReadBase):
+    """Natureza de operação fiscal (EFD 0400) — decisão-mãe da escrituração.
+
+    Seeds globais curados vivem sob ``tenant_id = SYSTEM_TENANT_ID``
+    (``00000000-0000-0000-0000-000000000001``), visíveis a todos os tenants; o
+    tenant pode criar/sobrepor as suas (mesmo ``nature_code``). O motor de regras
+    deriva CFOP/CST/crédito/bucket de ``consequences_json`` (per-imposto aninhado:
+    ``cfop_by_direction`` + ``icms``/``ipi``/``pis``/``cofins`` + ``by_regime``).
+    Use ``MasterDataRepository.list_operation_natures`` (inclui os seeds do
+    sistema por padrão).
+    """
+
+    __tablename__ = "operation_natures"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    nature_code: Mapped[str] = mapped_column(String(80))
+    external_code: Mapped[str | None] = mapped_column(String(20))
+    name: Mapped[str] = mapped_column(String(200))
+    use_simplified_rule: Mapped[bool] = mapped_column(Boolean)
+    use_nature_cfop: Mapped[bool] = mapped_column(Boolean)
+    consequences_json: Mapped[dict | None] = mapped_column(_JSONB)
     is_active: Mapped[bool] = mapped_column(Boolean)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

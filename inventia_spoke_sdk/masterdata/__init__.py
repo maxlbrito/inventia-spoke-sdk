@@ -35,17 +35,20 @@ from inventia_spoke_sdk.masterdata.models import (
     CnaeCode,
     Company,
     IbgeMunicipality,
+    OperationNature,
     Participant,
     Product,
     ReadBase,
     UnitOfMeasure,
 )
 from inventia_spoke_sdk.masterdata.repository import (
+    SYSTEM_TENANT_ID,
     CertificateMaterial,
     MasterDataRepository,
 )
 
 __all__ = [
+    "SYSTEM_TENANT_ID",
     "Certificate",
     "CertificateDecryptError",
     "CertificateKey",
@@ -55,6 +58,7 @@ __all__ = [
     "Company",
     "IbgeMunicipality",
     "MasterDataRepository",
+    "OperationNature",
     "Participant",
     "Product",
     "ReadBase",
