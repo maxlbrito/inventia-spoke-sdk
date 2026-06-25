@@ -30,10 +30,15 @@ from inventia_spoke_sdk.masterdata.models import (
     CnaeCode,
     Company,
     IbgeMunicipality,
+    OperationNature,
     Participant,
     Product,
     UnitOfMeasure,
 )
+
+# Tenant "sistema": dono dos seeds globais curados (naturezas etc.), visíveis a
+# todos os tenants. UUID fixo em todos os ambientes (espelha o master-data).
+SYSTEM_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
 def _as_uuid(value: str | UUID) -> UUID:
@@ -201,6 +206,57 @@ class MasterDataRepository:
             stmt = stmt.where(Participant.is_active.is_(True))
         stmt = stmt.order_by(Participant.legal_name).limit(limit)
         return (await session.execute(stmt)).scalars().all()
+
+    # --- OperationNature (EFD 0400) -----------------------------------------
+
+    async def list_operation_natures(
+        self,
+        session: AsyncSession,
+        *,
+        tenant_id: str | UUID,
+        active_only: bool = True,
+        include_system: bool = True,
+        limit: int = 2000,
+    ) -> Sequence[OperationNature]:
+        """Naturezas do tenant + (por padrão) os seeds globais do sistema.
+
+        Devolve as linhas cruas — o consumidor decide a precedência quando um
+        ``nature_code`` existe tanto no tenant quanto no sistema (convenção:
+        a do tenant sobrepõe). Ordenado por ``nature_code``.
+        """
+        tenant_ids = [_as_uuid(tenant_id)]
+        if include_system:
+            tenant_ids.append(SYSTEM_TENANT_ID)
+        stmt = select(OperationNature).where(OperationNature.tenant_id.in_(tenant_ids))
+        if active_only:
+            stmt = stmt.where(OperationNature.is_active.is_(True))
+        stmt = stmt.order_by(OperationNature.nature_code).limit(limit)
+        return (await session.execute(stmt)).scalars().all()
+
+    async def get_operation_nature_by_code(
+        self,
+        session: AsyncSession,
+        *,
+        tenant_id: str | UUID,
+        nature_code: str,
+        include_system: bool = True,
+    ) -> OperationNature | None:
+        """Natureza por ``nature_code`` — a do tenant tem precedência sobre o
+        seed do sistema de mesmo código."""
+        tid = _as_uuid(tenant_id)
+        tenant_ids = [tid]
+        if include_system:
+            tenant_ids.append(SYSTEM_TENANT_ID)
+        stmt = select(OperationNature).where(
+            OperationNature.tenant_id.in_(tenant_ids),
+            OperationNature.nature_code == nature_code,
+        )
+        rows = list((await session.execute(stmt)).scalars().all())
+        if not rows:
+            return None
+        # tenant sobrepõe sistema (ordena a do tenant primeiro)
+        rows.sort(key=lambda r: r.tenant_id != tid)
+        return rows[0]
 
     # --- Certificate (metadados) --------------------------------------------
 
